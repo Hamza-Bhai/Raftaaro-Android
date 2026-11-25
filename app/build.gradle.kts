@@ -1,4 +1,5 @@
 import com.android.build.api.variant.FilterConfiguration
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -33,10 +34,36 @@ android {
         }
     }
 
+    // Release key and passwords live in local.properties (git-ignored) or, on CI, in environment
+    // variables. Without them a local release build is signed with the debug key, for testing only.
+    val props = Properties().apply {
+        rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    }
+    fun secret(key: String, env: String): String? = props.getProperty(key) ?: System.getenv(env)
+    val storeFilePath = secret("release.storeFile", "RELEASE_STORE_FILE")
+
+    signingConfigs {
+        if (storeFilePath != null) create("release") {
+            storeFile = rootProject.file(storeFilePath)
+            storePassword = secret("release.storePassword", "RELEASE_STORE_PASSWORD")
+            keyAlias = secret("release.keyAlias", "RELEASE_KEY_ALIAS")
+            keyPassword = secret("release.keyPassword", "RELEASE_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
+    }
+
+    dependenciesInfo {
+        // F-Droid cannot verify Google's encrypted dependency block
+        includeInApk = false
+        includeInBundle = false
     }
 
     compileOptions {

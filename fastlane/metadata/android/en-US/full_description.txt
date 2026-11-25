@@ -1,0 +1,29 @@
+Raftaaro is a free, open-source download manager with no ads and no tracking.
+
+<b>Share, pick, done</b>
+See a video in YouTube, Instagram, Facebook or any other app? Tap Share, choose Raftaaro, pick a quality. The download runs in the background and the file appears in your gallery.
+
+<b>Videos and audio</b>
+<ul>
+<li>Only the qualities the video really has (144p up to 4K/8K), each with an estimated size</li>
+<li>Audio only, as MP3 or M4A</li>
+<li>Playlists and channels: tick the videos you want; they are saved in a folder named after the playlist</li>
+<li>YouTube, Instagram, Facebook, TikTok, X, Vimeo and the many other sites yt-dlp supports</li>
+</ul>
+
+<b>Files</b>
+<ul>
+<li>Any file link, downloaded over up to 16 connections at once</li>
+<li>Pause and resume, even after a restart</li>
+</ul>
+
+<b>Also</b>
+<ul>
+<li>Sign in to YouTube, Instagram or Facebook inside the app for videos that need it; your sign-in stays on your phone</li>
+<li>Offers to download a link you copied</li>
+<li>yt-dlp updates itself</li>
+</ul>
+
+Raftaaro uses yt-dlp, FFmpeg, Python and QuickJS through youtubedl-android.
+
+Download only content you have the right to download.

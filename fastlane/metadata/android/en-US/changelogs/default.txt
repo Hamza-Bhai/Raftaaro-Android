@@ -1,0 +1,1 @@
+First release: share-to-download with quality picker, playlists, multi-part file downloads, background queue with pause/resume, in-app sign-in, self-updating yt-dlp.
