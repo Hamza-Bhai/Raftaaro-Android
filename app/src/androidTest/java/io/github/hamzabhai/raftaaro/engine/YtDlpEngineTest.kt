@@ -29,6 +29,18 @@ class YtDlpEngineTest {
         assertTrue(r.info.formats.isNotEmpty())
     }
 
+    @Test fun aDownloadRightAfterReadingTheLinkReusesTheReading(): Unit = runBlocking {
+        engine.ensureReady()
+        engine.probe(url, null)
+        val work = File(ctx.filesDir, "test-jobs/reuse").apply { deleteRecursively(); mkdirs() }
+        val t0 = System.currentTimeMillis()
+        val file = engine.download("t3", url, mp3, work, null, null, {}, {})
+        val ms = System.currentTimeMillis() - t0
+        android.util.Log.i("Raftaaro", "download after probe took $ms ms")
+        assertTrue(file.exists() && file.name.endsWith(".mp3"))
+        work.deleteRecursively()
+    }
+
     @Test fun downloadsItAsMp3IntoTheWorkDirAndASecondRunReusesIt(): Unit = runBlocking {
         engine.ensureReady()
         val work = File(ctx.filesDir, "test-jobs/mp3").apply { deleteRecursively(); mkdirs() }

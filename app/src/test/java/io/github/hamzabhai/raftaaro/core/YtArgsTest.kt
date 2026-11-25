@@ -19,10 +19,18 @@ class YtArgsTest {
     @Test fun `probes a playlist link as a playlist`() =
         assertFalse(probeArgs("https://www.youtube.com/playlist?list=PL1", null).contains("--no-playlist"))
 
-    @Test fun `paces requests to YouTube only`() {
-        assertTrue(probeArgs("https://youtu.be/x", null).containsRun(pacing))
-        assertFalse(probeArgs("https://www.instagram.com/reel/x", null).containsRun(pacing))
+    @Test fun `paces YouTube downloads only`() {
         assertTrue(downloadArgs("https://youtu.be/x", null, "/w", null).containsRun(pacing))
+        assertFalse(downloadArgs("https://www.instagram.com/reel/x", null, "/w", null).containsRun(pacing))
+    }
+
+    @Test fun `reading a link is not slowed down by pacing`() =
+        assertFalse(probeArgs("https://youtu.be/x", null).contains("--sleep-requests"))
+
+    @Test fun `a download can reuse the info read for the share sheet`() {
+        val args = downloadArgs("https://youtu.be/x", null, "/w", null, infoJson = "/c/info.json")
+        assertTrue(args.containsRun(listOf("--load-info-json", "/c/info.json")))
+        assertFalse(downloadArgs("https://youtu.be/x", null, "/w", null).contains("--load-info-json"))
     }
 
     @Test fun `passes cookies only when a file is given`() {

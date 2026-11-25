@@ -1,6 +1,7 @@
 package io.github.hamzabhai.raftaaro.ui.share
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.hamzabhai.raftaaro.core.JobKind
@@ -97,10 +98,15 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun probe(url: String): ShareState {
+        val t0 = System.currentTimeMillis()
         val settings = graph.settings.current()
         graph.engine.ensureReady()
+        val t1 = System.currentTimeMillis()
         if (isYouTubeUrl(url)) graph.awaitFirstUpdate()
-        return when (val r = graph.engine.probe(url, graph.cookiesFor(url, settings))) {
+        val t2 = System.currentTimeMillis()
+        val r = graph.engine.probe(url, graph.cookiesFor(url, settings))
+        Log.i("Raftaaro", "probe timing: engine ${t1 - t0} ms, update wait ${t2 - t1} ms, yt-dlp ${System.currentTimeMillis() - t2} ms")
+        return when (r) {
             is ProbeResult.Video -> ShareState.Video(r.info, buildQualityOptions(r.info, MediaType.VIDEO), buildQualityOptions(r.info, MediaType.AUDIO))
             is ProbeResult.Playlist -> ShareState.Playlist(r.info)
             is ProbeResult.OpenTab -> ShareState.Failed("Could not open this channel", null)
