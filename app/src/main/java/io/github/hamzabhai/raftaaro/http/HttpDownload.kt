@@ -48,6 +48,17 @@ internal fun fileNameFrom(res: Response): String {
     return sanitizeFileName(name)
 }
 
+/** Name and size of a plain file link, for the share sheet. */
+suspend fun inspectFile(client: OkHttpClient, url: String): Pair<String, Long?> = withContext(Dispatchers.IO) {
+    val res = client.newCall(Request.Builder().url(url).header("Range", "bytes=0-0").build()).execute()
+    res.use {
+        if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+        val size = if (it.code == 206) Regex("""/(\d+)\s*$""").find(it.header("Content-Range").orEmpty())?.groupValues?.get(1)?.toLong()
+        else it.header("Content-Length")?.toLongOrNull()?.takeIf { l -> l > 0 }
+        fileNameFrom(it) to size
+    }
+}
+
 /**
  * Multi-part HTTP(S) download with resume. Parts live in `workDir/parts/` until joined into
  * `workDir/out/<name>`. Cancelling the coroutine pauses; running again with the same `workDir` resumes.

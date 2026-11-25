@@ -8,11 +8,9 @@ import io.github.hamzabhai.raftaaro.core.JobKind
 import io.github.hamzabhai.raftaaro.core.JobStatus
 import io.github.hamzabhai.raftaaro.core.VideoChoice
 import io.github.hamzabhai.raftaaro.core.afterFailure
-import io.github.hamzabhai.raftaaro.core.cookieCount
 import io.github.hamzabhai.raftaaro.core.jobsToStart
 import io.github.hamzabhai.raftaaro.core.nextWake
 import io.github.hamzabhai.raftaaro.core.onAppStart
-import io.github.hamzabhai.raftaaro.core.usesSiteLogin
 import io.github.hamzabhai.raftaaro.http.HttpDownload
 import android.net.Uri
 import kotlinx.coroutines.CancellationException
@@ -172,8 +170,7 @@ class DownloadQueue(private val graph: AppGraph) {
                         HttpDownload(graph.http, job.url, work, settings.partsPerFile)
                             .run { ticks.value = Tick(it.received, it.total, it.speedBps) }.file
                     } else {
-                        val cookies = usesSiteLogin(job.url)?.let { graph.cookieFile(it) }
-                            ?.takeIf { settings.useSignIns && it.isFile && cookieCount(it.readText()) > 0 }
+                        val cookies = graph.cookiesFor(job.url, settings)
                         graph.engine.download(
                             job.id, job.url, job.choice, work, cookies, job.totalBytes,
                             { ticks.value = Tick(it.received, it.total, it.speedBps, ticks.value?.merging == true) },

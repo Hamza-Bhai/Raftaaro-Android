@@ -1,7 +1,10 @@
 package io.github.hamzabhai.raftaaro
 
 import android.content.Context
+import io.github.hamzabhai.raftaaro.core.Settings
 import io.github.hamzabhai.raftaaro.core.Site
+import io.github.hamzabhai.raftaaro.core.cookieCount
+import io.github.hamzabhai.raftaaro.core.usesSiteLogin
 import io.github.hamzabhai.raftaaro.data.AppDatabase
 import io.github.hamzabhai.raftaaro.data.JobRepository
 import io.github.hamzabhai.raftaaro.data.SettingsStore
@@ -31,6 +34,11 @@ class AppGraph(context: Context) {
 
     /** Where a site's sign-in cookies are kept (only on this phone). */
     fun cookieFile(site: Site): File = File(this.context.filesDir, "cookies/${site.name.lowercase()}.txt")
+
+    /** The saved sign-in for this URL's site, when sign-ins are on and the user is signed in. */
+    fun cookiesFor(url: String, settings: Settings): File? =
+        usesSiteLogin(url)?.let { cookieFile(it) }
+            ?.takeIf { settings.useSignIns && it.isFile && cookieCount(it.readText()) > 0 }
 
     /** Per-job folder for partial data; survives restarts so downloads can resume. */
     fun workDir(jobId: String): File = File(this.context.filesDir, "jobs/$jobId")

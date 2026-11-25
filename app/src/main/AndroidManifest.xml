@@ -19,6 +19,26 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Raftaaro">
 
+        <activity
+            android:name=".ui.share.ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Raftaaro.Translucent">
+            <!-- "Share" a link from YouTube, Instagram, a browser... to Raftaaro -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.signin.SignInActivity"
+            android:exported="false" />
+
         <service
             android:name=".download.DownloadService"
             android:exported="false"
