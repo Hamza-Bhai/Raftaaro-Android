@@ -26,3 +26,6 @@ keystore/
 .DS_Store
 Thumbs.db
 *.log
+
+# Agent scratch (screenshots, logs, plan ledger)
+.superpowers/
