@@ -47,7 +47,7 @@ The defining moment is: someone is watching a video in Instagram, YouTube, Faceb
 
 - **Platform:** Android 8.0 (API 26) and newer; target the latest stable SDK. Phones are mostly arm64; also ship armeabi-v7a and x86_64.
 - **F-Droid:** everything must build from source with free dependencies from Maven Central / Google Maven. No proprietary SDKs. F-Droid will likely tag the app with the "Non-Free Network Services" anti-feature; that is expected.
-- **License:** MIT, same as desktop.
+- **License:** GPL-3.0 (owner's decision, 2026-11-25), because youtubedl-android is GPL-3.0 — the same reason Seal and YTDLnis are GPL-3.0. The desktop app stays MIT.
 - **Engine:** [youtubedl-android](https://github.com/yausername/youtubedl-android) 0.18.x (`io.github.junkfood02.youtubedl-android`), which bundles Python 3.12, yt-dlp, ffmpeg and QuickJS. Verified on a TECNO KG8 (Android 11, arm64) by the prototype in this repo: info, MP4 (merged) and MP3 all worked, and in-app yt-dlp update worked (to 2026.11.23).
 - **Bundled yt-dlp is old** (2025.11.12 in the library). YouTube breaks old versions, so the first launch must update it before the first YouTube download where possible.
 - **Android background limits:** long transfers need a foreground service (type `dataSync`) with a visible notification. On Android 15+ a `dataSync` service gets about 6 hours per 24 hours; when the system calls `onTimeout`, running jobs must be paused cleanly and marked as such, not lost.
@@ -104,7 +104,7 @@ Claude's calls (the owner can overrule):
 - Sign-ins: YouTube, Instagram, Facebook — each shows signed in / out, with **Sign in** / **Sign out**. A master switch "Use my sign-ins for downloads".
 - Clipboard prompt on/off.
 - yt-dlp: current version, last checked, **Update now**.
-- About: version, licenses (yt-dlp Unlicense, FFmpeg LGPL, Python PSF, QuickJS MIT), source link, responsible-use note.
+- About: version, licenses (yt-dlp Unlicense, FFmpeg LGPL, Python PSF, QuickJS MIT, youtubedl-android GPL-3.0), source link, responsible-use note.
 
 ### 5.4 Downloads engine
 

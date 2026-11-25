@@ -37,4 +37,4 @@ Download only content you have the right to download. Respect copyright and the 
 
 ## License
 
-MIT
+[GPL-3.0](LICENSE), because the bundled [youtubedl-android](https://github.com/yausername/youtubedl-android) library is GPL-3.0. The [desktop app](https://github.com/Hamza-Bhai/Raftaaro-Downloader) is MIT.
