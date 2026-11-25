@@ -1,0 +1,5 @@
+<resources>
+    <!-- DayNight follows the phone's dark mode; Compose draws the real UI. -->
+    <style name="Theme.Raftaaro" parent="android:Theme.Material.Light.NoActionBar" />
+    <color name="ic_launcher_bg">#FFFFFF</color>
+</resources>

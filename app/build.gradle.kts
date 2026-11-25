@@ -1,26 +1,35 @@
+import com.android.build.api.variant.FilterConfiguration
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.devtools.ksp")
 }
 
 val ytdl = "0.18.1"
+val abis = listOf("armeabi-v7a", "arm64-v8a", "x86_64")
 
 android {
-    namespace = "app.raftaaro"
+    namespace = "io.github.hamzabhai.raftaaro"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.raftaaro"
-        // Android 10+: downloads go to Download/Raftaaro through MediaStore, no storage permission.
-        minSdk = 29
+        applicationId = "io.github.hamzabhai.raftaaro"
+        minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0-prototype"
+        versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
 
-        ndk {
-            // Phones only for the prototype; x86 emulators can be added back later.
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include(*abis.toTypedArray())
+            isUniversalApk = true
         }
     }
 
@@ -48,6 +57,25 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+// Split APKs get versionCode * 10 + 1/2/3 so F-Droid and updates pick the right one; universal keeps * 10.
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val abi = output.filters.find { it.filterType == FilterConfiguration.FilterType.ABI }?.identifier
+            val base = output.versionCode.get() ?: 1
+            output.versionCode.set(base * 10 + (abi?.let { abis.indexOf(it) + 1 } ?: 0))
+        }
+    }
 }
 
 dependencies {
@@ -57,7 +85,34 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
+    implementation("androidx.lifecycle:lifecycle-service:2.8.3")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.3")
+    implementation("androidx.navigation:navigation-compose:2.8.4")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
