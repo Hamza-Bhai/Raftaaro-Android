@@ -31,6 +31,11 @@ class AppGraph(context: Context) {
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        // same plain name the desktop app sends
+        .addInterceptor { chain ->
+            val req = chain.request()
+            chain.proceed(if (req.header("User-Agent") == null) req else req.newBuilder().header("User-Agent", "Raftaaro").build())
+        }
         .build()
     val saver = Saver(this.context)
     val queue = DownloadQueue(this)

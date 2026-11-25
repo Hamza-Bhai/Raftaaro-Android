@@ -64,7 +64,19 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
         loading?.cancel()
         loading = viewModelScope.launch {
             _state.value = try {
-                if (!isVideoSiteUrl(url) && looksLikeFile(url)) fileState(url) else probe(url)
+                if (isVideoSiteUrl(url)) probe(url)
+                else {
+                    // unknown site: a direct file (any type but a web page) skips yt-dlp, which would
+                    // otherwise start fetching the whole file just to look at it
+                    val inspected = runCatching { inspectFile(graph.http, url) }
+                    val info = inspected.getOrNull()
+                    when {
+                        info != null && (info.isFile || looksLikeFile(url)) -> ShareState.File(url, info.name, info.size)
+                        // a file link the server refuses: say so instead of handing it to yt-dlp
+                        info == null && looksLikeFile(url) -> failed(url, inspected.exceptionOrNull()!!)
+                        else -> probe(url)
+                    }
+                }
             } catch (e: YtDlpError) {
                 if (e.message?.contains("Unsupported URL") == true) runCatching { fileState(url) }.getOrElse { failed(url, it) }
                 else failed(url, e)
@@ -80,8 +92,8 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     private suspend fun fileState(url: String): ShareState {
-        val (name, size) = inspectFile(graph.http, url)
-        return ShareState.File(url, name, size)
+        val info = inspectFile(graph.http, url)
+        return ShareState.File(url, info.name, info.size)
     }
 
     private suspend fun probe(url: String): ShareState {
