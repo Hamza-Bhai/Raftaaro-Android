@@ -13,7 +13,10 @@ import io.github.hamzabhai.raftaaro.download.Saver
 import io.github.hamzabhai.raftaaro.engine.YtDlpEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -31,6 +34,26 @@ class AppGraph(context: Context) {
         .build()
     val saver = Saver(this.context)
     val queue = DownloadQueue(this)
+
+    /** Unpacks the engine and checks for a newer yt-dlp (at most daily) as soon as the app starts. */
+    var warmUpJob: Job? = null
+        private set
+
+    fun warmUp() {
+        warmUpJob = scope.launch {
+            runCatching { engine.ensureReady() }
+            runCatching { engine.updateIfDue(settings) }
+        }
+    }
+
+    /**
+     * Before the first YouTube probe ever, give a running yt-dlp update up to 8 s to finish:
+     * the bundled yt-dlp is old and YouTube rejects old versions.
+     */
+    suspend fun awaitFirstUpdate() {
+        if (settings.current().lastYtDlpUpdate != null) return
+        withTimeoutOrNull(8_000) { warmUpJob?.join() }
+    }
 
     /** Where a site's sign-in cookies are kept (only on this phone). */
     fun cookieFile(site: Site): File = File(this.context.filesDir, "cookies/${site.name.lowercase()}.txt")

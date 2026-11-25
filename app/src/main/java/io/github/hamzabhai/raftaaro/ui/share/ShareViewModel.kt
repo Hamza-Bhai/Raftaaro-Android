@@ -17,6 +17,7 @@ import io.github.hamzabhai.raftaaro.core.YtDlpError
 import io.github.hamzabhai.raftaaro.core.buildQualityOptions
 import io.github.hamzabhai.raftaaro.core.extractFirstUrl
 import io.github.hamzabhai.raftaaro.core.isVideoSiteUrl
+import io.github.hamzabhai.raftaaro.core.isYouTubeUrl
 import io.github.hamzabhai.raftaaro.core.sanitizeFileName
 import io.github.hamzabhai.raftaaro.core.usesSiteLogin
 import io.github.hamzabhai.raftaaro.graph
@@ -86,6 +87,7 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun probe(url: String): ShareState {
         val settings = graph.settings.current()
         graph.engine.ensureReady()
+        if (isYouTubeUrl(url)) graph.awaitFirstUpdate()
         return when (val r = graph.engine.probe(url, graph.cookiesFor(url, settings))) {
             is ProbeResult.Video -> ShareState.Video(r.info, buildQualityOptions(r.info, MediaType.VIDEO), buildQualityOptions(r.info, MediaType.AUDIO))
             is ProbeResult.Playlist -> ShareState.Playlist(r.info)

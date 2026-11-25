@@ -158,5 +158,7 @@ class YtDlpEngine(context: Context) {
         }
     }
 
-    fun version(): String? = YoutubeDL.getInstance().versionName(ctx) ?: YoutubeDL.getInstance().version(ctx)
+    /** "2026.11.23" (the library reports "yt-dlp 2026.11.23"). */
+    fun version(): String? =
+        (YoutubeDL.getInstance().versionName(ctx) ?: YoutubeDL.getInstance().version(ctx))?.removePrefix("yt-dlp")?.trim()
 }
