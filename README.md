@@ -1,23 +1,30 @@
-# Raftaaro-Android
+# Raftaaro for Android
 
-Android version of [Raftaaro](https://github.com/Hamza-Bhai/Raftaaro-Downloader), the free, open-source download manager. **This is an early prototype.**
+A free, open-source download manager for Android, with no ads and no tracking. It is the Android version of [Raftaaro](https://github.com/Hamza-Bhai/Raftaaro-Downloader) for Windows.
 
-Built with Kotlin and Jetpack Compose. Video and audio extraction is done by [yt-dlp](https://github.com/yt-dlp/yt-dlp) through [youtubedl-android](https://github.com/yausername/youtubedl-android), which bundles Python, ffmpeg and QuickJS.
+See a video in YouTube, Instagram, Facebook or any other app, tap **Share → Raftaaro**, pick a quality, done. The download runs in the background and the file appears in your gallery.
 
-## What the prototype does
+## Features
 
-- Paste a link, or share it from YouTube, Instagram, a browser… to Raftaaro
-- **Info**: title, uploader, length and available qualities
-- **Video**: best quality up to 1080p, saved as MP4
-- **MP3**: audio only
-- **Engine check**: shows the bundled yt-dlp and Python versions
-- **Update yt-dlp**: updates yt-dlp from inside the app
+- **Videos and audio** from YouTube, Instagram, Facebook, TikTok, X, Vimeo and the many other sites [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports
+- Only the qualities the video really has (144p up to 4K/8K), each with an estimated size; audio as MP3 or M4A
+- **Playlists and channels**: tick the videos you want; they go in a folder named after the playlist
+- **Any file link** (zip, apk, pdf…) over up to 16 connections at once
+- **Queue** with a limit on parallel downloads; YouTube downloads run one at a time and back off when YouTube asks
+- **Pause and resume**, even after the phone restarts
+- **Sign in** to YouTube, Instagram or Facebook inside the app for videos that need it; your sign-in stays on your phone
+- Offers to download a link you copied
+- yt-dlp updates itself once a day
 
-Files are saved to `Download/Raftaaro`. Android 10 or newer is required.
+Files are saved to `Download/Raftaaro/Videos`, `/Audio` and `/Files` (changeable in Settings). Android 8.0 or newer.
 
-Not yet: background downloads, queue, playlists, logins, multi-part file downloads.
+## Install
 
-## Build
+Download the APK for your phone from [Releases](https://github.com/Hamza-Bhai/Raftaaro-Android/releases/latest): `arm64-v8a` for almost all phones from the last years, `armeabi-v7a` for older ones, `universal` if unsure. Raftaaro is also being submitted to F-Droid.
+
+Raftaaro is not on Google Play: Play does not allow YouTube downloaders.
+
+## Build from source
 
 Requirements: JDK 17 and the Android SDK (platform 35). Put the SDK path in `local.properties`:
 
@@ -25,16 +32,46 @@ Requirements: JDK 17 and the Android SDK (platform 35). Put the SDK path in `loc
 sdk.dir=C\:/path/to/android/sdk
 ```
 
-Then:
+| Command | What it does |
+| --- | --- |
+| `./gradlew testDebugUnitTest` | Unit tests (JVM) |
+| `./gradlew connectedDebugAndroidTest` | Device tests (a phone with USB/wireless debugging; some need internet) |
+| `./gradlew assembleDebug` | Debug APKs in `app/build/outputs/apk/debug/` |
+| `./gradlew assembleRelease` | Release APKs (R8-shrunk), one per ABI plus a universal one |
 
-```bash
-./gradlew assembleDebug    # APK in app/build/outputs/apk/debug/
+### Release signing
+
+Create a key once and keep it safe — without it you cannot ship updates:
+
 ```
+keytool -genkeypair -v -keystore keystore/raftaaro-release.jks -alias raftaaro -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Then add to `local.properties` (git-ignored):
+
+```
+release.storeFile=keystore/raftaaro-release.jks
+release.storePassword=...
+release.keyAlias=raftaaro
+release.keyPassword=...
+```
+
+Without these, a local release build is signed with the debug key (for testing only).
+
+For the GitHub release workflow (`.github/workflows/release.yml`, runs on `v*` tags), add the repository secrets `RELEASE_KEYSTORE_BASE64` (the `.jks` file in base64), `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS` and `RELEASE_KEY_PASSWORD`.
+
+## Privacy
+
+Everything stays on your phone. There are no analytics, ads or accounts. Sign-in cookies are kept in the app's private storage and only passed to yt-dlp for that site's links.
 
 ## Responsible use
 
 Download only content you have the right to download. Respect copyright and the terms of service of the sites you use.
 
+## Credits
+
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) (Unlicense), [FFmpeg](https://ffmpeg.org/) (LGPL 2.1+), Python (PSF) and QuickJS (MIT), bundled by [youtubedl-android](https://github.com/yausername/youtubedl-android) (GPL-3.0).
+
 ## License
 
-MIT
+[GPL-3.0](LICENSE), because the bundled youtubedl-android library is GPL-3.0. The [desktop app](https://github.com/Hamza-Bhai/Raftaaro-Downloader) is MIT.

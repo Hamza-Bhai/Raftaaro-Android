@@ -1,0 +1,12 @@
+<resources>
+    <!-- DayNight follows the phone's dark mode; Compose draws the real UI. -->
+    <style name="Theme.Raftaaro" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- The share sheet floats over the app the user shared from. -->
+    <style name="Theme.Raftaaro.Translucent" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+    <color name="ic_launcher_bg">#FFFFFF</color>
+</resources>
