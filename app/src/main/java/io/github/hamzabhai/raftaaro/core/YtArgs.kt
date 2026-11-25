@@ -5,10 +5,9 @@ import java.net.URI
 /** Pauses between YouTube requests and downloads so the network does not look like a bot. */
 private val YOUTUBE_PACING = listOf("--sleep-requests", "1", "--sleep-interval", "3", "--max-sleep-interval", "8")
 
-private fun commonArgs(url: String, cookieFile: String?): List<String> = buildList {
+private fun commonArgs(cookieFile: String?): List<String> = buildList {
     addAll(listOf("--encoding", "utf-8", "--no-warnings"))
     if (cookieFile != null) addAll(listOf("--cookies", cookieFile))
-    if (isYouTubeUrl(url)) addAll(YOUTUBE_PACING)
 }
 
 /** A watch URL with &list= still means "this one video"; playlists are shared as playlist URLs. */
@@ -18,17 +17,25 @@ private fun singleVideo(url: String): Boolean = try {
     false
 }
 
-/** Arguments for `yt-dlp -J` (the URL itself is added by the caller). */
+/**
+ * Arguments for `yt-dlp -J` (the URL itself is added by the caller). Not paced: it is one look at
+ * one link while the user waits, and the pauses added seconds to every share.
+ */
 fun probeArgs(url: String, cookieFile: String?): List<String> = buildList {
     addAll(listOf("-J", "--flat-playlist"))
-    addAll(commonArgs(url, cookieFile))
+    addAll(commonArgs(cookieFile))
     if (singleVideo(url)) add("--no-playlist")
 }
 
-/** Arguments for a download into `workDir` (the URL itself is added by the caller). */
-fun downloadArgs(url: String, choice: VideoChoice?, workDir: String, cookieFile: String?): List<String> = buildList {
+/**
+ * Arguments for a download into `workDir`. With `infoJson` (what the share sheet already read) yt-dlp
+ * skips reading the page again and the caller passes no URL; otherwise the caller adds the URL.
+ */
+fun downloadArgs(url: String, choice: VideoChoice?, workDir: String, cookieFile: String?, infoJson: String? = null): List<String> = buildList {
     addAll(if (choice == null) listOf("-f", "b") else buildFormatSelector(choice))
-    addAll(commonArgs(url, cookieFile))
+    addAll(commonArgs(cookieFile))
+    if (isYouTubeUrl(url)) addAll(YOUTUBE_PACING)
+    if (infoJson != null) addAll(listOf("--load-info-json", infoJson))
     val tag = if (choice?.media == MediaType.VIDEO && choice.height != null) " ${choice.height}p" else ""
     addAll(listOf("-o", "$workDir/%(title).150B [%(id)s]$tag.%(ext)s"))
     addAll(listOf("--newline", "--progress-template", "download:$PROGRESS_TEMPLATE"))
@@ -36,3 +43,10 @@ fun downloadArgs(url: String, choice: VideoChoice?, workDir: String, cookieFile:
     addAll(listOf("--print", "after_move:$FILE_MARK%(filepath)s"))
     addAll(listOf("--no-quiet", "--progress", "--no-mtime", "--continue", "--no-playlist"))
 }
+
+/**
+ * A fast first look at a YouTube link (title, thumbnail, length) through a client that needs no
+ * player code, so no slow JavaScript challenge. Its formats are incomplete: never download from it.
+ */
+fun quickProbeArgs(url: String, cookieFile: String?): List<String> =
+    probeArgs(url, cookieFile) + listOf("--extractor-args", "youtube:player_client=android_vr")

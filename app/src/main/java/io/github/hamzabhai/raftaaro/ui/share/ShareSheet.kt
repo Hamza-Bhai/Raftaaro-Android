@@ -113,6 +113,11 @@ private fun VideoChoices(state: ShareState.Video, onPick: (VideoChoice?) -> Unit
         state.video.forEach { o -> QualityRow(o) { onPick(VideoChoice(MediaType.VIDEO, o.height)) } }
         Section("Audio")
         state.audio.forEach { o -> QualityRow(o) { onPick(VideoChoice(MediaType.AUDIO, null, o.audioFormat)) } }
+        if (state.refining) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(10.dp))
+            Text("Checking all qualities…", style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 package io.github.hamzabhai.raftaaro.ui.share
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.hamzabhai.raftaaro.core.JobKind
@@ -15,6 +16,7 @@ import io.github.hamzabhai.raftaaro.core.VideoChoice
 import io.github.hamzabhai.raftaaro.core.VideoInfo
 import io.github.hamzabhai.raftaaro.core.YtDlpError
 import io.github.hamzabhai.raftaaro.core.buildQualityOptions
+import io.github.hamzabhai.raftaaro.core.presetQualityOptions
 import io.github.hamzabhai.raftaaro.core.extractFirstUrl
 import io.github.hamzabhai.raftaaro.core.isVideoSiteUrl
 import io.github.hamzabhai.raftaaro.core.isYouTubeUrl
@@ -23,6 +25,8 @@ import io.github.hamzabhai.raftaaro.core.usesSiteLogin
 import io.github.hamzabhai.raftaaro.graph
 import io.github.hamzabhai.raftaaro.http.inspectFile
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -31,7 +35,8 @@ import java.net.URI
 sealed interface ShareState {
     data class Loading(val url: String) : ShareState
     data class NoLink(val text: String) : ShareState
-    data class Video(val info: VideoInfo, val video: List<QualityOption>, val audio: List<QualityOption>) : ShareState
+    /** `refining`: a first look with preset qualities while the real list is still being read. */
+    data class Video(val info: VideoInfo, val video: List<QualityOption>, val audio: List<QualityOption>, val refining: Boolean = false) : ShareState
     data class Playlist(val info: PlaylistInfo) : ShareState
     data class File(val url: String, val name: String, val size: Long?) : ShareState
     data class Failed(val message: String, val signIn: Site?) : ShareState
@@ -96,16 +101,41 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
         return ShareState.File(url, info.name, info.size)
     }
 
-    private suspend fun probe(url: String): ShareState {
+    private suspend fun probe(url: String): ShareState = coroutineScope {
+        val t0 = System.currentTimeMillis()
         val settings = graph.settings.current()
         graph.engine.ensureReady()
-        if (isYouTubeUrl(url)) graph.awaitFirstUpdate()
-        return when (val r = graph.engine.probe(url, graph.cookiesFor(url, settings))) {
+        val cookies = graph.cookiesFor(url, settings)
+        // YouTube takes half a minute to list every quality on a phone; show a usable sheet first.
+        // One after the other: run together, both slow down on the phone's CPU.
+        val quick = if (isYouTubeVideo(url)) runCatching { graph.engine.quickProbe(url, cookies) }.getOrNull() as? ProbeResult.Video else null
+        val full = async {
+            if (isYouTubeUrl(url)) graph.awaitFirstUpdate()
+            graph.engine.probe(url, cookies)
+        }
+        if (quick != null) {
+            val (video, audio) = presetQualityOptions()
+            _state.value = ShareState.Video(quick.info, video, audio, refining = true)
+            Log.i("Raftaaro", "probe timing: first look after ${System.currentTimeMillis() - t0} ms")
+        }
+        val r = try {
+            full.await()
+        } catch (e: YtDlpError) {
+            // the first look still works: downloads read the link themselves
+            if (quick != null) return@coroutineScope ShareState.Video(quick.info, presetQualityOptions().first, presetQualityOptions().second)
+            throw e
+        }
+        Log.i("Raftaaro", "probe timing: full list after ${System.currentTimeMillis() - t0} ms")
+        when (r) {
             is ProbeResult.Video -> ShareState.Video(r.info, buildQualityOptions(r.info, MediaType.VIDEO), buildQualityOptions(r.info, MediaType.AUDIO))
             is ProbeResult.Playlist -> ShareState.Playlist(r.info)
             is ProbeResult.OpenTab -> ShareState.Failed("Could not open this channel", null)
         }
     }
+
+    /** A single YouTube video (not a playlist or channel), the only kind the quick first look handles. */
+    private fun isYouTubeVideo(url: String): Boolean =
+        isYouTubeUrl(url) && (Regex("""[?&]v=""").containsMatchIn(url) || "youtu.be/" in url || "/shorts/" in url)
 
     /** Enqueue the single video or file shown. `choice == null` means a plain file. Runs past the sheet closing. */
     fun pick(choice: VideoChoice?) {
