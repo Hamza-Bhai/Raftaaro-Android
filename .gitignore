@@ -1,0 +1,28 @@
+# Gradle / build output
+.gradle/
+.kotlin/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Built apps
+*.apk
+*.aab
+output-metadata.json
+
+# Machine-specific settings (SDK path)
+local.properties
+
+# Signing keys and secrets
+*.jks
+*.keystore
+keystore/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
