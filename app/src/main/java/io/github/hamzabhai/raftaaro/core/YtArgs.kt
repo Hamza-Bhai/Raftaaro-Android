@@ -43,3 +43,10 @@ fun downloadArgs(url: String, choice: VideoChoice?, workDir: String, cookieFile:
     addAll(listOf("--print", "after_move:$FILE_MARK%(filepath)s"))
     addAll(listOf("--no-quiet", "--progress", "--no-mtime", "--continue", "--no-playlist"))
 }
+
+/**
+ * A fast first look at a YouTube link (title, thumbnail, length) through a client that needs no
+ * player code, so no slow JavaScript challenge. Its formats are incomplete: never download from it.
+ */
+fun quickProbeArgs(url: String, cookieFile: String?): List<String> =
+    probeArgs(url, cookieFile) + listOf("--extractor-args", "youtube:player_client=android_vr")

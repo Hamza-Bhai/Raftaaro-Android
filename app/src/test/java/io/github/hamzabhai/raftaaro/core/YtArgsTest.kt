@@ -55,4 +55,10 @@ class YtArgsTest {
 
     @Test fun `a file job without a choice takes the best single file`() =
         assertTrue(downloadArgs("https://example.com/v", null, "/w", null).containsRun(listOf("-f", "b")))
+
+    @Test fun `a quick look asks a YouTube client that needs no player code`() {
+        val args = quickProbeArgs("https://youtu.be/x", null)
+        assertTrue(args.containsRun(listOf("--extractor-args", "youtube:player_client=android_vr")))
+        assertTrue(args.containsRun(listOf("-J", "--flat-playlist")))
+    }
 }

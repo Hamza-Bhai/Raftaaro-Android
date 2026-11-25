@@ -77,4 +77,14 @@ class ShareSheetTest {
         rule.onNodeWithText("Download").performClick()
         assertEquals(true, picked)
     }
+
+    @Test fun aFirstLookSaysTheRealQualitiesAreStillComing() {
+        show(video.copy(refining = true))
+        rule.onNodeWithText("Checking all qualities…").assertExists()
+    }
+
+    @Test fun theFinalListHasNoCheckingNote() {
+        show(video)
+        rule.onNodeWithText("Checking all qualities…").assertDoesNotExist()
+    }
 }

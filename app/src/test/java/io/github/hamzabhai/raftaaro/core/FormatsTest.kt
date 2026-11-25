@@ -120,4 +120,12 @@ class FormatsTest {
             buildFormatSelector(VideoChoice(MediaType.AUDIO, null, AudioFormat.M4A))
         )
     }
+
+    @Test fun `preset qualities offer common heights and audio before the real list is known`() {
+        val (video, audio) = presetQualityOptions()
+        assertEquals(listOf("⭐ Best", "1080p", "720p", "480p", "360p"), video.map { it.label })
+        assertEquals(listOf(null, 1080, 720, 480, 360), video.map { it.height })
+        assertEquals(listOf("MP3", "M4A"), audio.map { it.label })
+        assertTrue((video + audio).all { it.estBytes == null })
+    }
 }
