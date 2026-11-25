@@ -113,8 +113,13 @@ class DownloadQueue(private val graph: AppGraph) {
         }
     }
 
+    /**
+     * Keeps the process in the foreground while anything runs. Android 12+ refuses this from the
+     * background (e.g. a cooldown timer firing); the download then runs unprotected until the app
+     * is opened again, rather than failing.
+     */
     private fun startService() {
-        ContextCompat.startForegroundService(graph.context, Intent(graph.context, DownloadService::class.java))
+        runCatching { ContextCompat.startForegroundService(graph.context, Intent(graph.context, DownloadService::class.java)) }
     }
 
     /** Starts whatever the rules allow now, and sets a timer for the next rate-limit cooldown. */
@@ -124,7 +129,9 @@ class DownloadQueue(private val graph: AppGraph) {
             val jobs = repo.all()
             val now = System.currentTimeMillis()
             val max = graph.settings.current().maxConcurrent
-            for (id in jobsToStart(jobs, running.keys, max, now)) {
+            val toStart = jobsToStart(jobs, running.keys, max, now)
+            if (toStart.isNotEmpty()) startService()
+            for (id in toStart) {
                 val job = jobs.first { it.id == id }
                 running[id] = graph.scope.launch { run(job) }
             }

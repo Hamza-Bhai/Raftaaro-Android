@@ -1,6 +1,7 @@
 package io.github.hamzabhai.raftaaro.engine
 
 import android.content.Context
+import android.util.Log
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
@@ -26,13 +27,20 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.coroutines.coroutineContext
 
 /** yt-dlp, Python and ffmpeg as bundled by youtubedl-android. */
 class YtDlpEngine(context: Context) {
     private val ctx = context.applicationContext
     private val initLock = Mutex()
-    private val updateLock = Mutex()
+    private companion object {
+        /** One yt-dlp file per process: serialises updates across every engine instance. */
+        val updateLock = Mutex()
+        /** Shared by running yt-dlp processes, exclusive while the yt-dlp file is replaced. */
+        val binary = ReentrantReadWriteLock()
+    }
     @Volatile private var ready = false
 
     /** Unpacks the engine on first run (a few seconds). Safe to call often. */
@@ -51,7 +59,6 @@ class YtDlpEngine(context: Context) {
     /** Runs yt-dlp; on cancel kills the process (and its ffmpeg). Returns stdout, throws [YtDlpError]. */
     private suspend fun exec(request: YoutubeDLRequest, processId: String?, onLine: (String) -> Unit = {}): String {
         ensureReady()
-        updateLock.withLock { } // never run while yt-dlp itself is being replaced
         return withContext(Dispatchers.IO) {
             coroutineScope {
                 val watcher = processId?.let { id ->
@@ -64,12 +71,19 @@ class YtDlpEngine(context: Context) {
                     }
                 }
                 try {
-                    YoutubeDL.getInstance().execute(request, processId) { _, _, line -> onLine(line) }.out
+                    // yt-dlp is a zip Python reads lazily: it must not be replaced while any run uses it
+                    binary.readLock().lock()
+                    try {
+                        YoutubeDL.getInstance().execute(request, processId) { _, _, line -> onLine(line) }.out
+                    } finally {
+                        binary.readLock().unlock()
+                    }
                 } catch (e: YoutubeDL.CanceledException) {
                     coroutineContext.ensureActive()
                     throw YtDlpError("Download stopped")
                 } catch (e: YoutubeDLException) {
                     coroutineContext.ensureActive()
+                    Log.w("Raftaaro", "yt-dlp failed: ${e.message?.takeLast(2000)}", e.cause)
                     throw YtDlpError(classifyYtDlpError(e.message.orEmpty()))
                 } finally {
                     watcher?.cancel()
@@ -149,10 +163,18 @@ class YtDlpEngine(context: Context) {
         ensureReady()
         return updateLock.withLock {
             withContext(Dispatchers.IO) {
-                when (YoutubeDL.getInstance().updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.STABLE)) {
-                    YoutubeDL.UpdateStatus.DONE -> "yt-dlp updated to ${version()}"
-                    YoutubeDL.UpdateStatus.ALREADY_UP_TO_DATE -> "yt-dlp is already up to date"
-                    null -> "yt-dlp could not be updated"
+                // wait for running yt-dlp processes to finish; a long download makes us give up for now
+                if (!binary.writeLock().tryLock(30, TimeUnit.SECONDS)) {
+                    throw YtDlpError("yt-dlp is busy with downloads — it will update when they finish")
+                }
+                try {
+                    when (YoutubeDL.getInstance().updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.STABLE)) {
+                        YoutubeDL.UpdateStatus.DONE -> "yt-dlp updated to ${version()}"
+                        YoutubeDL.UpdateStatus.ALREADY_UP_TO_DATE -> "yt-dlp is already up to date"
+                        null -> "yt-dlp could not be updated"
+                    }
+                } finally {
+                    binary.writeLock().unlock()
                 }
             }
         }
