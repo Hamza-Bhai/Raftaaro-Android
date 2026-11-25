@@ -3,6 +3,7 @@ package io.github.hamzabhai.raftaaro.ui.share
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +29,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import io.github.hamzabhai.raftaaro.core.AudioFormat
 import io.github.hamzabhai.raftaaro.core.MediaType
 import io.github.hamzabhai.raftaaro.core.PlaylistEntry
 import io.github.hamzabhai.raftaaro.core.QualityOption
@@ -123,8 +133,52 @@ private fun QualityRow(o: QualityOption, onClick: () -> Unit) {
     }
 }
 
+/** Qualities for a whole playlist; heights are maximums because entries are not probed one by one. */
+private val PLAYLIST_CHOICES = listOf(
+    "Best" to VideoChoice(MediaType.VIDEO, null),
+    "1080p" to VideoChoice(MediaType.VIDEO, 1080),
+    "720p" to VideoChoice(MediaType.VIDEO, 720),
+    "480p" to VideoChoice(MediaType.VIDEO, 480),
+    "MP3" to VideoChoice(MediaType.AUDIO, null, AudioFormat.MP3),
+    "M4A" to VideoChoice(MediaType.AUDIO, null, AudioFormat.M4A)
+)
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PlaylistChoices(state: ShareState.Playlist, onPlaylist: (List<PlaylistEntry>, VideoChoice) -> Unit) {
-    Text(state.info.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 8.dp))
-    Text("${state.info.entries.size} videos", style = MaterialTheme.typography.bodySmall)
+private fun ColumnScope.PlaylistChoices(state: ShareState.Playlist, onPlaylist: (List<PlaylistEntry>, VideoChoice) -> Unit) {
+    val entries = state.info.entries
+    var ticked by remember(entries) { mutableStateOf(entries.indices.toSet()) }
+    var choice by remember { mutableStateOf(PLAYLIST_CHOICES.first().second) }
+    Text(state.info.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+    Text("${entries.size} videos", style = MaterialTheme.typography.bodySmall)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+        PLAYLIST_CHOICES.forEach { (label, c) ->
+            FilterChip(selected = choice == c, onClick = { choice = c }, label = { Text(label) })
+        }
+    }
+    Row(
+        Modifier.fillMaxWidth().clickable { ticked = if (ticked.size == entries.size) emptySet() else entries.indices.toSet() },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(checked = ticked.size == entries.size, onCheckedChange = null)
+        Text("Select all", modifier = Modifier.padding(start = 8.dp))
+    }
+    HorizontalDivider()
+    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+        entries.forEachIndexed { i, e ->
+            Row(
+                Modifier.fillMaxWidth().clickable { ticked = if (i in ticked) ticked - i else ticked + i }.padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(checked = i in ticked, onCheckedChange = null)
+                Text(e.title, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                Text(formatDuration(e.durationSec), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+    Button(
+        onClick = { onPlaylist(entries.filterIndexed { i, _ -> i in ticked }, choice) },
+        enabled = ticked.isNotEmpty(),
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+    ) { Text("Download ${ticked.size}") }
 }
