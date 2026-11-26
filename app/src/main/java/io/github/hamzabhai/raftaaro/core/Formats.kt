@@ -57,8 +57,9 @@ fun buildFormatSelector(choice: VideoChoice): List<String> {
         return if (choice.audioFormat == AudioFormat.M4A) listOf("-f", "ba[ext=m4a]/ba/b", "-x", "--audio-format", "m4a")
         else listOf("-f", "ba/b", "-x", "--audio-format", "mp3", "--audio-quality", "0")
     }
-    // proto: at the same height a plain https download (exact size) beats a streamed m3u8 one
-    val merge = listOf("-S", "res,proto,+codec:avc:m4a", "--merge-output-format", "mp4")
+    // proto: at the same height a plain https download (exact size) beats a streamed m3u8 one.
+    // mp4/mkv: MP4 when the streams fit it, else MKV (VP9 in an MP4 plays as sound only on many phones)
+    val merge = listOf("-S", "res,proto,+codec:avc:m4a", "--merge-output-format", "mp4/mkv")
     val h = choice.height ?: return listOf("-f", "bv*+ba/b") + merge
     return listOf("-f", "bv*[height<=$h]+ba/b[height<=$h]/bv*+ba/b") + merge
 }

@@ -1,5 +1,7 @@
 package io.github.hamzabhai.raftaaro.engine
 
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -19,7 +21,9 @@ import java.io.File
  * Each link is read and downloaded (at most 90 s) at 360p, or at Best where the site gives no heights
  * (LinkedIn), as the share sheet then offers only Best; what happened is logged under "RaftaaroSmoke"
  * and the engine logs whether it went direct. Skipped in normal runs. A tab (channel Shorts) is
- * resolved to its first video, kept in its /shorts/ form.
+ * resolved to its first video, kept in its /shorts/ form. `quality=best` downloads every link at Best.
+ * `direct=off` makes yt-dlp do every download. Each finished file's container and video codec are
+ * logged: VP9 must arrive in an .mkv (in an .mp4 many phones' players give sound only).
  */
 @RunWith(AndroidJUnit4::class)
 class LinkSmokeTest {
@@ -28,7 +32,8 @@ class LinkSmokeTest {
     @Test fun eachLinkDownloadsOrFailsClearly(): Unit = runBlocking {
         val links = InstrumentationRegistry.getArguments().getString("links")?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
         assumeTrue("no links given", !links.isNullOrEmpty())
-        val engine = YtDlpEngine(ctx, http = OkHttpClient())
+        val direct = InstrumentationRegistry.getArguments().getString("direct") != "off"
+        val engine = if (direct) YtDlpEngine(ctx, http = OkHttpClient()) else YtDlpEngine(ctx)
         engine.ensureReady()
         for ((i, given) in links!!.withIndex()) {
             var link = given
@@ -47,7 +52,8 @@ class LinkSmokeTest {
             Log.i("RaftaaroSmoke", "[$i] $link read in ${System.currentTimeMillis() - t0} ms: $read")
             if (probe.getOrNull() !is ProbeResult.Video) continue
             val heights = (probe.getOrNull() as ProbeResult.Video).info.formats.mapNotNull { it.height }
-            val choice = VideoChoice(MediaType.VIDEO, if (heights.isEmpty()) null else 360)
+            val best = InstrumentationRegistry.getArguments().getString("quality") == "best"
+            val choice = VideoChoice(MediaType.VIDEO, if (heights.isEmpty() || best) null else 360)
             val work = File(ctx.filesDir, "test-jobs/smoke$i").apply { deleteRecursively(); mkdirs() }
             var last = 0L
             t0 = System.currentTimeMillis()
@@ -58,11 +64,27 @@ class LinkSmokeTest {
             }
             val ms = System.currentTimeMillis() - t0
             val outcome = result.fold(
-                { f -> if (f == null) "STILL RUNNING after 90 s ($last bytes), stopped" else "done: ${f.name} ${f.length()} bytes" },
+                { f -> if (f == null) "STILL RUNNING after 90 s ($last bytes), stopped" else "done: ${f.name} ${f.length()} bytes, ${videoTracks(f)}" },
                 { "FAILED: ${it.message}" }
             )
             Log.i("RaftaaroSmoke", "[$i] download (${choice.height?.let { "${it}p" } ?: "Best"}) in $ms ms: $outcome")
             work.deleteRecursively()
+        }
+    }
+
+    /** "mkv: x-vnd.on2.vp9 1080x1920" for a finished file. */
+    private fun videoTracks(file: File): String {
+        val ex = MediaExtractor()
+        return try {
+            ex.setDataSource(file.absolutePath)
+            val video = (0 until ex.trackCount).map { ex.getTrackFormat(it) }
+                .filter { it.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                .joinToString { "${it.getString(MediaFormat.KEY_MIME)!!.substringAfterLast('/')} ${it.getInteger(MediaFormat.KEY_WIDTH)}x${it.getInteger(MediaFormat.KEY_HEIGHT)}" }
+            "${file.extension}: ${video.ifEmpty { "NO VIDEO TRACK" }}"
+        } catch (e: Exception) {
+            "tracks unreadable: ${e.message}"
+        } finally {
+            ex.release()
         }
     }
 }

@@ -16,7 +16,7 @@ class YtDlpError(message: String) : Exception(message)
 const val RATE_LIMIT_MESSAGE = "YouTube asked us to slow down. Raftaaro will retry automatically."
 const val OUTDATED_MESSAGE = "yt-dlp is out of date — update it in Settings"
 /** yt-dlp's ffmpeg cannot record YouTube's live HLS on a phone, and a recording would never end. */
-const val LIVE_MESSAGE = "This is a live stream � download it after it ends"
+const val LIVE_MESSAGE = "This is a live stream — download it after it ends"
 const val UNSUPPORTED_MESSAGE = "Raftaaro can't download from this site"
 const val SIGN_IN_MESSAGE = "Sign-in required — sign in to this site in Raftaaro's Settings, then try again"
 
