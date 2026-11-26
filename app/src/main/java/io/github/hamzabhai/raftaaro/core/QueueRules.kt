@@ -45,3 +45,18 @@ fun onAppStart(jobs: List<Job>): List<Job> =
 /** Earliest future retryAt among queued jobs, for the wake-up timer. */
 fun nextWake(jobs: List<Job>, now: Long): Long? =
     jobs.filter { it.status == JobStatus.QUEUED }.mapNotNull { it.retryAt }.filter { it > now }.minOrNull()
+
+/**
+ * While a YouTube playlist video downloads, the page of the next one (the oldest queued YouTube
+ * playlist video) is read, so it can start its direct download at once. Null for anything else.
+ */
+fun readAheadFor(job: Job, jobs: List<Job>): String? {
+    fun playlistYouTube(j: Job) = j.kind == JobKind.VIDEO && j.folder != null && isYouTubeUrl(j.url)
+    if (!playlistYouTube(job)) return null
+    return jobs.filter { it.id != job.id && it.status == JobStatus.QUEUED && playlistYouTube(it) }
+        .minByOrNull { it.createdAt }?.url
+}
+
+/** When the next paced YouTube page read may start: at once the first time, else `gapMs` after the last one ended. */
+fun nextReadAt(lastReadEnd: Long?, now: Long, gapMs: Long): Long =
+    if (lastReadEnd == null) now else maxOf(now, lastReadEnd + gapMs)

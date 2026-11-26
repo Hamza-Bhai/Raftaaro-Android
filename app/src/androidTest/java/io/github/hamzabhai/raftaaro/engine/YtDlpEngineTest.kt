@@ -8,6 +8,7 @@ import io.github.hamzabhai.raftaaro.core.ProbeResult
 import io.github.hamzabhai.raftaaro.core.VideoChoice
 import io.github.hamzabhai.raftaaro.core.VideoProgress
 import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,5 +57,27 @@ class YtDlpEngineTest {
         val again = engine.download("t2", url, mp3, work, null, null, {}, {})
         assertEquals(file, again)
         work.deleteRecursively()
+    }
+
+    @Test fun aPlaylistVideoIsReadAheadAndBothDownloadDirectly(): Unit = runBlocking {
+        val fast = YtDlpEngine(ctx, http = OkHttpClient())
+        fast.ensureReady()
+        // nothing read yet, as for a freshly queued playlist
+        File(ctx.cacheDir, "yt-dlp/info").deleteRecursively()
+        val second = "$url&feature=share"
+        val w1 = File(ctx.filesDir, "test-jobs/pl1").apply { deleteRecursively(); mkdirs() }
+        val w2 = File(ctx.filesDir, "test-jobs/pl2").apply { deleteRecursively(); mkdirs() }
+        val t0 = System.currentTimeMillis()
+        val f1 = fast.download("p1", url, mp3, w1, null, null, {}, {}, paced = true, readAhead = second)
+        val t1 = System.currentTimeMillis()
+        val f2 = fast.download("p2", second, mp3, w2, null, null, {}, {}, paced = true)
+        val t2 = System.currentTimeMillis()
+        android.util.Log.i("Raftaaro", "playlist: first ${t1 - t0} ms, second ${t2 - t1} ms")
+        assertTrue(f1.isFile && f1.name.endsWith(".mp3"))
+        assertTrue(f2.isFile && f2.name.endsWith(".mp3"))
+        // both pages were read and kept (the second one ahead), which is what a direct download needs
+        assertTrue(File(ctx.cacheDir, "yt-dlp/info").listFiles().orEmpty().size == 2)
+        w1.deleteRecursively()
+        w2.deleteRecursively()
     }
 }

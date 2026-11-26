@@ -9,6 +9,13 @@ fun stalePlayerFiles(files: List<Pair<String, Long>>, keep: Int): List<String> =
     files.filter { it.first.startsWith("player") }.sortedByDescending { it.second }.drop(keep).map { it.first }
 
 /**
+ * A short public video read once a day in the background (PlayerWarmUpWorker):
+ * reading any YouTube video fetches YouTube's current player and solves its challenge, so after
+ * YouTube changes players the user's next video does not wait ~36 s for the cache to be rebuilt.
+ */
+const val WARM_UP_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+
+/**
  * yt-dlp plugin that turns on the challenge solver's prepared-player cache (off in yt-dlp because
  * the files are large and it does not delete old ones; [stalePlayerFiles] does). With it, solving
  * YouTube's challenge takes ~3 s instead of ~20 s on a phone for every video after the first.

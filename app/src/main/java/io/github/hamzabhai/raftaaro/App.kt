@@ -2,6 +2,7 @@ package io.github.hamzabhai.raftaaro
 
 import android.app.Application
 import android.content.Context
+import io.github.hamzabhai.raftaaro.engine.PlayerWarmUpWorker
 
 class App : Application() {
     lateinit var graph: AppGraph
@@ -11,6 +12,7 @@ class App : Application() {
         super.onCreate()
         graph = AppGraph(this)
         graph.warmUp()
+        PlayerWarmUpWorker.schedule(this)
     }
 }
 
