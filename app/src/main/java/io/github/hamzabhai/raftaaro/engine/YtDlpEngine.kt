@@ -20,7 +20,6 @@ import io.github.hamzabhai.raftaaro.core.PLAYER_CACHE_PLUGIN
 import io.github.hamzabhai.raftaaro.core.PRECOMPILE_SCRIPT
 import io.github.hamzabhai.raftaaro.core.stalePlayerFiles
 import io.github.hamzabhai.raftaaro.core.probeArgs
-import io.github.hamzabhai.raftaaro.core.quickProbeArgs
 import io.github.hamzabhai.raftaaro.core.shouldUpdateYtDlp
 import io.github.hamzabhai.raftaaro.data.SettingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -216,13 +215,6 @@ class YtDlpEngine(
         if (r is ProbeResult.Video) runCatching { infoFile(url).apply { parentFile?.mkdirs() }.writeText(out) }
         return r
     }
-
-    /**
-     * A fast first look at a YouTube video for the share sheet: title, thumbnail and length are right,
-     * but the formats are incomplete, so it is never kept for a download.
-     */
-    suspend fun quickProbe(url: String, cookieFile: File?): ProbeResult =
-        parseProbe(url, exec(YoutubeDLRequest(url).addCommands(quickProbeArgs(url, cookieFile?.absolutePath)), null))
 
     /** Where the share sheet's reading of a link is kept for the download. */
     private fun infoFile(url: String): File {

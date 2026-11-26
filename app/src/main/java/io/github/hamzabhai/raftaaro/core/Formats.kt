@@ -65,9 +65,10 @@ fun buildFormatSelector(choice: VideoChoice): List<String> {
 
 /**
  * Rows shown while the real list is still being read (YouTube takes half a minute on a phone).
- * Heights are maximums: yt-dlp picks the best stream at or below them when downloading.
+ * Heights are maximums: yt-dlp picks the best stream at or below them when downloading. Best has
+ * no cap (4K, 2K…), which its label says, since the rows below it stop at 1080p.
  */
 fun presetQualityOptions(): Pair<List<QualityOption>, List<QualityOption>> = Pair(
-    listOf(QualityOption(null, "⭐ Best", null)) + listOf(1080, 720, 480, 360).map { QualityOption(it, "${it}p", null) },
+    listOf(QualityOption(null, "⭐ Best (highest available)", null)) + listOf(1080, 720, 480, 360).map { QualityOption(it, "${it}p", null) },
     listOf(QualityOption(null, "MP3", null, AudioFormat.MP3), QualityOption(null, "M4A", null, AudioFormat.M4A))
 )

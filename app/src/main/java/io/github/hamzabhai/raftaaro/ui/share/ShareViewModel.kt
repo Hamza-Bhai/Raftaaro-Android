@@ -24,12 +24,18 @@ import io.github.hamzabhai.raftaaro.core.sanitizeFileName
 import io.github.hamzabhai.raftaaro.core.usesSiteLogin
 import io.github.hamzabhai.raftaaro.graph
 import io.github.hamzabhai.raftaaro.http.inspectFile
+import io.github.hamzabhai.raftaaro.core.oembedUrl
+import io.github.hamzabhai.raftaaro.core.parseOembed
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Request
 import java.net.URI
 
 sealed interface ShareState {
@@ -104,26 +110,25 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun probe(url: String): ShareState = coroutineScope {
         val t0 = System.currentTimeMillis()
         val settings = graph.settings.current()
-        graph.engine.ensureReady()
+        // the engine readies itself inside probe(); the first look does not wait for it
         val cookies = graph.cookiesFor(url, settings)
-        // Listing every quality takes a while on a phone; a quick first look (no JavaScript to solve)
-        // runs beside it and fills the sheet meanwhile. With the solver's player cached and yt-dlp
-        // precompiled, both together fit the phone's CPU and memory.
+        // Listing every quality takes ~10 s on a phone. Meanwhile YouTube's oEmbed (one small request,
+        // no Python) gives title and thumbnail for a first look with preset qualities.
         val full = async {
             if (isYouTubeUrl(url)) graph.awaitFirstUpdate()
             graph.engine.probe(url, cookies)
         }
-        val quick = if (isYouTubeVideo(url)) runCatching { graph.engine.quickProbe(url, cookies) }.getOrNull() as? ProbeResult.Video else null
+        val quick = if (isYouTubeVideo(url)) firstLook(url) else null
         if (quick != null && !full.isCompleted) {
             val (video, audio) = presetQualityOptions()
-            _state.value = ShareState.Video(quick.info, video, audio, refining = true)
+            _state.value = ShareState.Video(quick, video, audio, refining = true)
             Log.i("Raftaaro", "probe timing: first look after ${System.currentTimeMillis() - t0} ms")
         }
         val r = try {
             full.await()
         } catch (e: YtDlpError) {
             // the first look still works: downloads read the link themselves
-            if (quick != null) return@coroutineScope ShareState.Video(quick.info, presetQualityOptions().first, presetQualityOptions().second)
+            if (quick != null) return@coroutineScope ShareState.Video(quick, presetQualityOptions().first, presetQualityOptions().second)
             throw e
         }
         Log.i("Raftaaro", "probe timing: full list after ${System.currentTimeMillis() - t0} ms")
@@ -132,6 +137,17 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
             is ProbeResult.Playlist -> ShareState.Playlist(r.info)
             is ProbeResult.OpenTab -> ShareState.Failed("Could not open this channel", null)
         }
+    }
+
+    /** Title and thumbnail from YouTube's oEmbed; null when it is slow or refuses (private, age-gated). */
+    private suspend fun firstLook(url: String): VideoInfo? = withTimeoutOrNull(4_000) {
+        runCatching {
+            withContext(Dispatchers.IO) {
+                graph.http.newCall(Request.Builder().url(oembedUrl(url)).build()).execute().use { res ->
+                    if (res.isSuccessful) parseOembed(url, res.body!!.string()) else null
+                }
+            }
+        }.getOrNull()
     }
 
     /** A single YouTube video (not a playlist or channel), the only kind the quick first look handles. */
