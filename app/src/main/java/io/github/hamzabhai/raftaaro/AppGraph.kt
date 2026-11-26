@@ -27,7 +27,6 @@ class AppGraph(context: Context) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val jobs = JobRepository(AppDatabase.open(this.context).jobDao())
     val settings = SettingsStore(this.context)
-    val engine = YtDlpEngine(this.context)
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -37,6 +36,7 @@ class AppGraph(context: Context) {
             chain.proceed(if (req.header("User-Agent") == null) req else req.newBuilder().header("User-Agent", "Raftaaro").build())
         }
         .build()
+    val engine = YtDlpEngine(this.context, scope, http)
     val saver = Saver(this.context)
     val queue = DownloadQueue(this)
 
@@ -45,9 +45,15 @@ class AppGraph(context: Context) {
         private set
 
     fun warmUp() {
-        warmUpJob = scope.launch {
+        val job = scope.launch {
             runCatching { engine.ensureReady() }
             runCatching { engine.updateIfDue(settings) }
+        }
+        warmUpJob = job
+        // after any update (a new yt-dlp needs compiling again); not part of warmUpJob, which probes wait for
+        scope.launch {
+            job.join()
+            runCatching { engine.precompileIfNeeded() }
         }
     }
 

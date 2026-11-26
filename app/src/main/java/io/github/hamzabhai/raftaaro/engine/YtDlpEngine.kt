@@ -15,11 +15,19 @@ import io.github.hamzabhai.raftaaro.core.YtDlpError
 import io.github.hamzabhai.raftaaro.core.classifyYtDlpError
 import io.github.hamzabhai.raftaaro.core.downloadArgs
 import io.github.hamzabhai.raftaaro.core.parseProbe
+import io.github.hamzabhai.raftaaro.core.planDirect
+import io.github.hamzabhai.raftaaro.core.PLAYER_CACHE_PLUGIN
+import io.github.hamzabhai.raftaaro.core.PRECOMPILE_SCRIPT
+import io.github.hamzabhai.raftaaro.core.stalePlayerFiles
 import io.github.hamzabhai.raftaaro.core.probeArgs
-import io.github.hamzabhai.raftaaro.core.quickProbeArgs
 import io.github.hamzabhai.raftaaro.core.shouldUpdateYtDlp
 import io.github.hamzabhai.raftaaro.data.SettingsStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
@@ -27,15 +35,33 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.coroutines.coroutineContext
 
 /** yt-dlp, Python and ffmpeg as bundled by youtubedl-android. */
-class YtDlpEngine(context: Context) {
+class YtDlpEngine(
+    context: Context,
+    /** Runs link readings that must outlive whoever asked (the share sheet closes on a tap). */
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    /** With a client, downloads of an already-read link fetch the streams directly (no Python). */
+    http: OkHttpClient? = null
+) {
     private val ctx = context.applicationContext
+    private val bundled = Bundled(ctx)
+    private val direct = http?.let { DirectDownload(it, Ffmpeg(bundled)) }
+    /** yt-dlp plugin folder (see [PLAYER_CACHE_PLUGIN]). */
+    private val pluginDir = File(ctx.filesDir, "ytdlp-plugins")
+    private val pluginFile = File(pluginDir, "raftaaro/yt_dlp_plugins/extractor/raftaaro_player_cache.py")
+    /** "size:modified" of the yt-dlp file once it was precompiled; differs after the library replaces it. */
+    private val compiledMark = File(bundled.ytDlp.parentFile, "yt-dlp.compiled")
+    /** Link readings under way, by URL. */
+    private val probes = ConcurrentHashMap<String, Deferred<ProbeResult>>()
     /** yt-dlp's own cache (YouTube player code and solved challenges). */
     private val cacheDir = File(ctx.cacheDir, "yt-dlp")
     private val initLock = Mutex()
@@ -58,9 +84,58 @@ class YtDlpEngine(context: Context) {
             withContext(Dispatchers.IO) {
                 YoutubeDL.getInstance().init(ctx)
                 FFmpeg.getInstance().init(ctx)
+                if (!pluginFile.isFile || pluginFile.readText() != PLAYER_CACHE_PLUGIN) {
+                    pluginFile.parentFile?.mkdirs()
+                    pluginFile.writeText(PLAYER_CACHE_PLUGIN)
+                }
             }
             ready = true
         }
+    }
+
+    private fun ytDlpStamp() = bundled.ytDlp.let { "${it.length()}:${it.lastModified()}" }
+
+    /**
+     * Adds compiled code to the yt-dlp zip (once per yt-dlp version) so Python starts it in ~1 s
+     * instead of ~4 s. Takes a few seconds; skipped while yt-dlp runs, and tried again next start.
+     * A copy that fails to start is never put in place.
+     */
+    suspend fun precompileIfNeeded() {
+        ensureReady()
+        if (compiledMark.isFile && compiledMark.readText() == ytDlpStamp()) return
+        updateLock.withLock {
+            val src = bundled.ytDlp
+            val tmp = File(src.parentFile, "yt-dlp.compiling")
+            val script = File(ctx.cacheDir, "precompile.py").apply { writeText(PRECOMPILE_SCRIPT) }
+            try {
+                val t0 = System.currentTimeMillis()
+                // updateLock keeps the source from being replaced while it is read
+                bundled.run("python", listOf(script.absolutePath, src.absolutePath, tmp.absolutePath))
+                if (bundled.run("python", listOf(tmp.absolutePath, "--version")).isBlank()) throw IOException("compiled yt-dlp did not start")
+                withContext(Dispatchers.IO) {
+                    if (!binary.writeLock().tryLock(5, TimeUnit.SECONDS)) throw IOException("yt-dlp is busy")
+                    try {
+                        if (!tmp.renameTo(src)) throw IOException("could not replace yt-dlp")
+                        compiledMark.writeText(ytDlpStamp())
+                    } finally {
+                        binary.writeLock().unlock()
+                    }
+                }
+                Log.i("Raftaaro", "yt-dlp precompiled in ${System.currentTimeMillis() - t0} ms")
+            } catch (e: IOException) {
+                Log.i("Raftaaro", "yt-dlp not precompiled: ${e.message}")
+            } finally {
+                tmp.delete()
+                script.delete()
+            }
+        }
+    }
+
+    /** Deletes all but the newest prepared YouTube players the challenge solver kept. */
+    private fun dropStalePlayers() = runCatching {
+        val dir = File(cacheDir, "challenge-solver")
+        val files = dir.listFiles().orEmpty().map { it.name to it.lastModified() }
+        stalePlayerFiles(files, keep = 2).forEach { File(dir, it).delete() }
     }
 
     /** Runs yt-dlp; on cancel kills the process (and its ffmpeg). Returns stdout, throws [YtDlpError]. */
@@ -84,6 +159,8 @@ class YtDlpEngine(context: Context) {
                         // the library adds --no-cache-dir otherwise, and yt-dlp would fetch YouTube's
                         // player and solve its challenge again on every run
                         if (!request.hasOption("--cache-dir")) request.addOption("--cache-dir", cacheDir.absolutePath)
+                        // keeps YouTube's prepared player between runs (PLAYER_CACHE_PLUGIN)
+                        if (!request.hasOption("--plugin-dirs")) request.addOption("--plugin-dirs", pluginDir.absolutePath)
                         YoutubeDL.getInstance().execute(request, processId) { _, _, line -> onLine(line) }.out
                     } finally {
                         binary.readLock().unlock()
@@ -102,9 +179,33 @@ class YtDlpEngine(context: Context) {
         }
     }
 
-    /** What a link is: one video, or a playlist/channel. A channel root opens its Videos tab. */
+    /**
+     * What a link is: one video, or a playlist/channel. A channel root opens its Videos tab.
+     * The reading outlives the share sheet closing, and a download of the same link waits for it
+     * instead of reading the page a second time (two at once double the time on a phone, and the
+     * phone may kill the app for the memory they take).
+     */
     suspend fun probe(url: String, cookieFile: File?): ProbeResult {
+        val mine = scope.async(start = CoroutineStart.LAZY) { readLink(url, cookieFile) }
+        mine.invokeOnCompletion { probes.remove(url, mine) }
+        val running = probes.putIfAbsent(url, mine)
+        if (running != null) mine.cancel() else mine.start()
+        return (running ?: mine).await()
+    }
+
+    /** Lets a reading of this link that is under way finish, so its result can be used. */
+    private suspend fun awaitProbe(url: String) {
+        val running = probes[url] ?: return
+        try {
+            running.await()
+        } catch (e: Exception) {
+            coroutineContext.ensureActive() // its failure is not ours: the download reads the link itself
+        }
+    }
+
+    private suspend fun readLink(url: String, cookieFile: File?): ProbeResult {
         val out = exec(YoutubeDLRequest(url).addCommands(probeArgs(url, cookieFile?.absolutePath)), null)
+        dropStalePlayers()
         val r = parseProbe(url, out)
         if (r is ProbeResult.OpenTab) {
             val tabOut = exec(YoutubeDLRequest(r.url).addCommands(probeArgs(r.url, cookieFile?.absolutePath)), null)
@@ -114,13 +215,6 @@ class YtDlpEngine(context: Context) {
         if (r is ProbeResult.Video) runCatching { infoFile(url).apply { parentFile?.mkdirs() }.writeText(out) }
         return r
     }
-
-    /**
-     * A fast first look at a YouTube video for the share sheet: title, thumbnail and length are right,
-     * but the formats are incomplete, so it is never kept for a download.
-     */
-    suspend fun quickProbe(url: String, cookieFile: File?): ProbeResult =
-        parseProbe(url, exec(YoutubeDLRequest(url).addCommands(quickProbeArgs(url, cookieFile?.absolutePath)), null))
 
     /** Where the share sheet's reading of a link is kept for the download. */
     private fun infoFile(url: String): File {
@@ -134,7 +228,8 @@ class YtDlpEngine(context: Context) {
 
     /**
      * Downloads into `workDir` (resuming .part files from an earlier run) and returns the finished file.
-     * An "out of date" failure updates yt-dlp once and tries again.
+     * An "out of date" failure updates yt-dlp once and tries again. `paced`: part of a batch (a playlist),
+     * so YouTube downloads pause between requests; a single video starts at once.
      */
     suspend fun download(
         jobId: String,
@@ -144,12 +239,31 @@ class YtDlpEngine(context: Context) {
         cookieFile: File?,
         expected: Long?,
         onProgress: (VideoProgress) -> Unit,
-        onMerging: () -> Unit
+        onMerging: () -> Unit,
+        paced: Boolean = false,
+        parts: Int = 8
     ): File {
         workDir.mkdirs()
-        freshInfo(url)?.let { info ->
+        // tapped while the share sheet was still reading the link: use that reading when it is done
+        awaitProbe(url)
+        val once: suspend (File?) -> File = { info ->
+            downloadOnce(jobId, url, choice, workDir, cookieFile, expected, onProgress, onMerging, info, paced)
+        }
+        val info = freshInfo(url)
+        // the streams yt-dlp would pick are plain downloads: fetch them ourselves, no Python to start
+        val plan = if (direct != null && info != null) runCatching { planDirect(info.readText(), choice) }.getOrNull() else null
+        if (plan != null) {
+            ensureReady()
             try {
-                return downloadOnce(jobId, url, choice, workDir, cookieFile, expected, onProgress, onMerging, info)
+                return direct!!.run(plan, workDir, parts, onProgress, onMerging)
+            } catch (e: IOException) {
+                Log.i("Raftaaro", "direct download failed (${e.message}); handing it to yt-dlp")
+            }
+        }
+        File(workDir, "direct").deleteRecursively()
+        info?.let { info ->
+            try {
+                return once(info)
             } catch (e: YtDlpError) {
                 // stale or unusable reading: forget it and read the page as usual
                 Log.i("Raftaaro", "download from saved info failed (${e.message}); reading the link again")
@@ -157,25 +271,33 @@ class YtDlpEngine(context: Context) {
             }
         }
         return try {
-            downloadOnce(jobId, url, choice, workDir, cookieFile, expected, onProgress, onMerging)
+            once(null)
         } catch (e: YtDlpError) {
             if (e.message != OUTDATED_MESSAGE) throw e
             updateNow()
-            downloadOnce(jobId, url, choice, workDir, cookieFile, expected, onProgress, onMerging)
+            once(null)
         }
     }
 
     private suspend fun downloadOnce(
         jobId: String, url: String, choice: VideoChoice?, workDir: File, cookieFile: File?, expected: Long?,
-        onProgress: (VideoProgress) -> Unit, onMerging: () -> Unit, info: File? = null
+        onProgress: (VideoProgress) -> Unit, onMerging: () -> Unit, info: File?, paced: Boolean
     ): File {
         val tracker = ProgressTracker(expected)
-        val args = downloadArgs(url, choice, workDir.absolutePath, cookieFile?.absolutePath, info?.absolutePath)
+        val args = downloadArgs(url, choice, workDir.absolutePath, cookieFile?.absolutePath, info?.absolutePath, paced)
         // with --load-info-json the URL must not be given too, or yt-dlp would read the page anyway
         val req = (if (info != null) YoutubeDLRequest(emptyList<String>()) else YoutubeDLRequest(url)).addCommands(args)
+        val t0 = System.currentTimeMillis()
+        var started = false
         exec(req, jobId) { line ->
             val wasMerging = tracker.merging
-            tracker.onLine(line) { p -> File(p).takeIf { it.exists() }?.length() }?.let(onProgress)
+            tracker.onLine(line) { p -> File(p).takeIf { it.exists() }?.length() }?.let {
+                if (!started) {
+                    started = true
+                    Log.i("Raftaaro", "download timing: first bytes after ${System.currentTimeMillis() - t0} ms (saved info: ${info != null})")
+                }
+                onProgress(it)
+            }
             if (tracker.merging && !wasMerging) onMerging()
         }
         val file = listOfNotNull(tracker.finalPath, tracker.seenPath).map(::File).firstOrNull { it.isFile }

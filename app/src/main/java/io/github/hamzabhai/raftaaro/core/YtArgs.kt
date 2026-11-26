@@ -30,11 +30,14 @@ fun probeArgs(url: String, cookieFile: String?): List<String> = buildList {
 /**
  * Arguments for a download into `workDir`. With `infoJson` (what the share sheet already read) yt-dlp
  * skips reading the page again and the caller passes no URL; otherwise the caller adds the URL.
+ * `paced` (playlist batches) adds pauses on YouTube; a single video the user just tapped starts at once.
  */
-fun downloadArgs(url: String, choice: VideoChoice?, workDir: String, cookieFile: String?, infoJson: String? = null): List<String> = buildList {
+fun downloadArgs(
+    url: String, choice: VideoChoice?, workDir: String, cookieFile: String?, infoJson: String? = null, paced: Boolean = false
+): List<String> = buildList {
     addAll(if (choice == null) listOf("-f", "b") else buildFormatSelector(choice))
     addAll(commonArgs(cookieFile))
-    if (isYouTubeUrl(url)) addAll(YOUTUBE_PACING)
+    if (paced && isYouTubeUrl(url)) addAll(YOUTUBE_PACING)
     if (infoJson != null) addAll(listOf("--load-info-json", infoJson))
     val tag = if (choice?.media == MediaType.VIDEO && choice.height != null) " ${choice.height}p" else ""
     addAll(listOf("-o", "$workDir/%(title).150B [%(id)s]$tag.%(ext)s"))
@@ -43,10 +46,3 @@ fun downloadArgs(url: String, choice: VideoChoice?, workDir: String, cookieFile:
     addAll(listOf("--print", "after_move:$FILE_MARK%(filepath)s"))
     addAll(listOf("--no-quiet", "--progress", "--no-mtime", "--continue", "--no-playlist"))
 }
-
-/**
- * A fast first look at a YouTube link (title, thumbnail, length) through a client that needs no
- * player code, so no slow JavaScript challenge. Its formats are incomplete: never download from it.
- */
-fun quickProbeArgs(url: String, cookieFile: String?): List<String> =
-    probeArgs(url, cookieFile) + listOf("--extractor-args", "youtube:player_client=android_vr")

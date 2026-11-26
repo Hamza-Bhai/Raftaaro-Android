@@ -66,12 +66,17 @@ suspend fun inspectFile(client: OkHttpClient, url: String): FileInfo = withConte
 /**
  * Multi-part HTTP(S) download with resume. Parts live in `workDir/parts/` until joined into
  * `workDir/out/<name>`. Cancelling the coroutine pauses; running again with the same `workDir` resumes.
+ *
+ * @param headers sent with every request (e.g. the User-Agent a stream address was made for).
+ * @param maxRequestBytes asks for at most this much per request, in turn (YouTube slows long requests).
  */
 class HttpDownload(
     private val client: OkHttpClient,
     val url: String,
     private val workDir: File,
-    private val parts: Int
+    private val parts: Int,
+    private val headers: Map<String, String> = emptyMap(),
+    private val maxRequestBytes: Long? = null
 ) {
     private val received = AtomicLong(0)
     private val calls: MutableSet<Call> = Collections.synchronizedSet(mutableSetOf())
@@ -137,7 +142,7 @@ class HttpDownload(
         runCatching { Json.decodeFromString(Meta.serializer(), f.readText()) }.getOrNull()
 
     private fun execute(request: Request): Response {
-        val call = client.newCall(request)
+        val call = client.newCall(request.newBuilder().apply { headers.forEach { (k, v) -> header(k, v) } }.build())
         calls += call
         try {
             val res = call.execute()
@@ -167,14 +172,15 @@ class HttpDownload(
     }
 
     private suspend fun fetchPart(finalUrl: String, file: File, range: ByteRange?, onProgress: (HttpProgress) -> Unit) {
-        val req = Request.Builder().url(finalUrl)
-        if (range != null) {
-            val from = range.start + file.length()
-            if (from > range.end) return
-            req.header("Range", "bytes=$from-${range.end}")
-        }
         try {
-            readPart(req.build(), file, range, onProgress)
+            if (range == null) return readPart(Request.Builder().url(finalUrl).build(), file, null, onProgress)
+            // one request per slice of at most maxRequestBytes, each continuing where the file ends
+            while (true) {
+                val from = range.start + file.length()
+                if (from > range.end) return
+                val to = maxRequestBytes?.let { minOf(range.end, from + it - 1) } ?: range.end
+                readPart(Request.Builder().url(finalUrl).header("Range", "bytes=$from-$to").build(), file, ByteRange(range.start, to), onProgress)
+            }
         } catch (e: IOException) {
             coroutineContext.ensureActive()
             throw e
