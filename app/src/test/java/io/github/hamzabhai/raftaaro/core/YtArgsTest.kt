@@ -19,9 +19,15 @@ class YtArgsTest {
     @Test fun `probes a playlist link as a playlist`() =
         assertFalse(probeArgs("https://www.youtube.com/playlist?list=PL1", null).contains("--no-playlist"))
 
-    @Test fun `paces YouTube downloads only`() {
-        assertTrue(downloadArgs("https://youtu.be/x", null, "/w", null).containsRun(pacing))
-        assertFalse(downloadArgs("https://www.instagram.com/reel/x", null, "/w", null).containsRun(pacing))
+    @Test fun `paces YouTube playlist downloads only`() {
+        assertTrue(downloadArgs("https://youtu.be/x", null, "/w", null, paced = true).containsRun(pacing))
+        assertFalse(downloadArgs("https://www.instagram.com/reel/x", null, "/w", null, paced = true).containsRun(pacing))
+    }
+
+    @Test fun `a single video starts at once, without pauses`() {
+        val args = downloadArgs("https://youtu.be/x", null, "/w", null, paced = false)
+        assertFalse(args.contains("--sleep-interval"))
+        assertFalse(args.contains("--sleep-requests"))
     }
 
     @Test fun `reading a link is not slowed down by pacing`() =

@@ -30,11 +30,14 @@ fun probeArgs(url: String, cookieFile: String?): List<String> = buildList {
 /**
  * Arguments for a download into `workDir`. With `infoJson` (what the share sheet already read) yt-dlp
  * skips reading the page again and the caller passes no URL; otherwise the caller adds the URL.
+ * `paced` (playlist batches) adds pauses on YouTube; a single video the user just tapped starts at once.
  */
-fun downloadArgs(url: String, choice: VideoChoice?, workDir: String, cookieFile: String?, infoJson: String? = null): List<String> = buildList {
+fun downloadArgs(
+    url: String, choice: VideoChoice?, workDir: String, cookieFile: String?, infoJson: String? = null, paced: Boolean = false
+): List<String> = buildList {
     addAll(if (choice == null) listOf("-f", "b") else buildFormatSelector(choice))
     addAll(commonArgs(cookieFile))
-    if (isYouTubeUrl(url)) addAll(YOUTUBE_PACING)
+    if (paced && isYouTubeUrl(url)) addAll(YOUTUBE_PACING)
     if (infoJson != null) addAll(listOf("--load-info-json", infoJson))
     val tag = if (choice?.media == MediaType.VIDEO && choice.height != null) " ${choice.height}p" else ""
     addAll(listOf("-o", "$workDir/%(title).150B [%(id)s]$tag.%(ext)s"))

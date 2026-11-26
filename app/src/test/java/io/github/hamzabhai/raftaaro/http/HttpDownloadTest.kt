@@ -78,6 +78,31 @@ class HttpDownloadTest {
         assertEquals(8, rangeRequests.count { it != "bytes=0-0" })
     }
 
+    @Test fun `never asks for more than the request cap at once`() = runBlocking {
+        val result = HttpDownload(client, url("/file.bin"), dir(), 2, maxRequestBytes = 300_000).run {}
+        assertArrayEquals(data, result.file.readBytes())
+        val sizes = rangeRequests.filter { it != "bytes=0-0" }.map {
+            val m = Regex("""bytes=(\d+)-(\d+)""").find(it)!!
+            m.groupValues[2].toLong() - m.groupValues[1].toLong() + 1
+        }
+        assertTrue(sizes.all { it <= 300_000 })
+        assertTrue(sizes.size >= size / 300_000)
+    }
+
+    @Test fun `sends the given headers on every request`() = runBlocking {
+        val seen = Collections.synchronizedList(mutableListOf<String?>())
+        val inner = server.dispatcher
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                seen += request.getHeader("User-Agent")
+                return inner.dispatch(request)
+            }
+        }
+        HttpDownload(client, url("/file.bin"), dir(), 2, headers = mapOf("User-Agent" to "UA-test")).run {}
+        assertTrue(seen.isNotEmpty())
+        assertTrue(seen.all { it == "UA-test" })
+    }
+
     @Test fun `uses a sanitized name from Content-Disposition`() = runBlocking {
         assertEquals("My_File_.bin", HttpDownload(client, url("/named"), dir(), 2).run {}.fileName)
     }

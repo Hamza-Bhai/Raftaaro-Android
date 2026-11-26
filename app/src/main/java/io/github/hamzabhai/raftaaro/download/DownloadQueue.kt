@@ -181,7 +181,10 @@ class DownloadQueue(private val graph: AppGraph) {
                         graph.engine.download(
                             job.id, job.url, job.choice, work, cookies, job.totalBytes,
                             { ticks.value = Tick(it.received, it.total, it.speedBps, ticks.value?.merging == true) },
-                            { ticks.value = (ticks.value ?: Tick(0, null, 0)).copy(speed = 0, merging = true) }
+                            { ticks.value = (ticks.value ?: Tick(0, null, 0)).copy(speed = 0, merging = true) },
+                            // playlist entries go one after another: pace them; a single tap starts at once
+                            paced = job.folder != null,
+                            parts = settings.partsPerFile
                         )
                     }
                 } finally {

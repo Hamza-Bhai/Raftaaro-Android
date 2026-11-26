@@ -106,14 +106,15 @@ class ShareViewModel(app: Application) : AndroidViewModel(app) {
         val settings = graph.settings.current()
         graph.engine.ensureReady()
         val cookies = graph.cookiesFor(url, settings)
-        // YouTube takes half a minute to list every quality on a phone; show a usable sheet first.
-        // One after the other: run together, both slow down on the phone's CPU.
-        val quick = if (isYouTubeVideo(url)) runCatching { graph.engine.quickProbe(url, cookies) }.getOrNull() as? ProbeResult.Video else null
+        // Listing every quality takes a while on a phone; a quick first look (no JavaScript to solve)
+        // runs beside it and fills the sheet meanwhile. With the solver's player cached and yt-dlp
+        // precompiled, both together fit the phone's CPU and memory.
         val full = async {
             if (isYouTubeUrl(url)) graph.awaitFirstUpdate()
             graph.engine.probe(url, cookies)
         }
-        if (quick != null) {
+        val quick = if (isYouTubeVideo(url)) runCatching { graph.engine.quickProbe(url, cookies) }.getOrNull() as? ProbeResult.Video else null
+        if (quick != null && !full.isCompleted) {
             val (video, audio) = presetQualityOptions()
             _state.value = ShareState.Video(quick.info, video, audio, refining = true)
             Log.i("Raftaaro", "probe timing: first look after ${System.currentTimeMillis() - t0} ms")
