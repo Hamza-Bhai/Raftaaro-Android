@@ -75,6 +75,21 @@ class YtOutputTest {
         parseProbe("https://www.youtube.com/@chan", fixture("raw-channel.json"))
     )
 
+    @Test fun `a stream that is live now is refused with a clear message`() {
+        for (status in listOf("\"is_live\": true", "\"live_status\": \"is_live\"", "\"live_status\": \"is_upcoming\"")) {
+            val e = runCatching { parseProbe("https://www.youtube.com/@chan/live", "{\"title\": \"radio\", $status, \"formats\": []}") }.exceptionOrNull()
+            assertEquals(status, LIVE_MESSAGE, e?.message)
+        }
+    }
+
+    @Test fun `a stream that has ended is an ordinary video`() {
+        val r = parseProbe("https://www.youtube.com/watch?v=a", "{\"title\": \"was\", \"is_live\": false, \"live_status\": \"was_live\", \"formats\": []}")
+        assertEquals("was", (r as ProbeResult.Video).info.title)
+    }
+
+    @Test fun `a site yt-dlp does not know gets a short message`() =
+        assertEquals(UNSUPPORTED_MESSAGE, classifyYtDlpError("ERROR: Unsupported URL: https://www.threads.com/@a/post/B?xmt=long"))
+
     @Test fun `unreadable output is a friendly error`() {
         val e = runCatching { parseProbe("https://x.com/a", "not json") }.exceptionOrNull()
         assertEquals("Could not read the answer from yt-dlp", e?.message)

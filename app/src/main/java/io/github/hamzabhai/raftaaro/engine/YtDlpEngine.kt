@@ -20,6 +20,7 @@ import io.github.hamzabhai.raftaaro.core.PLAYER_CACHE_PLUGIN
 import io.github.hamzabhai.raftaaro.core.PRECOMPILE_SCRIPT
 import io.github.hamzabhai.raftaaro.core.WARM_UP_URL
 import io.github.hamzabhai.raftaaro.core.RATE_LIMIT_MESSAGE
+import io.github.hamzabhai.raftaaro.core.LIVE_MESSAGE
 import io.github.hamzabhai.raftaaro.core.isYouTubeUrl
 import io.github.hamzabhai.raftaaro.core.nextReadAt
 import io.github.hamzabhai.raftaaro.core.stalePlayerFiles
@@ -298,7 +299,8 @@ class YtDlpEngine(
             try {
                 pacedRead(url, cookieFile)
             } catch (e: YtDlpError) {
-                if (e.message == RATE_LIMIT_MESSAGE) throw e
+                // a cooldown or a live stream: yt-dlp would fail the same way
+                if (e.message == RATE_LIMIT_MESSAGE || e.message == LIVE_MESSAGE) throw e
                 Log.i("Raftaaro", "playlist video not read (${e.message}); handing it to yt-dlp")
             }
         }

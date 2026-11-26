@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlin.math.max
@@ -14,6 +15,9 @@ class YtDlpError(message: String) : Exception(message)
 
 const val RATE_LIMIT_MESSAGE = "YouTube asked us to slow down. Raftaaro will retry automatically."
 const val OUTDATED_MESSAGE = "yt-dlp is out of date — update it in Settings"
+/** yt-dlp's ffmpeg cannot record YouTube's live HLS on a phone, and a recording would never end. */
+const val LIVE_MESSAGE = "This is a live stream � download it after it ends"
+const val UNSUPPORTED_MESSAGE = "Raftaaro can't download from this site"
 const val SIGN_IN_MESSAGE = "Sign-in required — sign in to this site in Raftaaro's Settings, then try again"
 
 /** Printed for every progress tick; parsed by [parseProgress]. */
@@ -46,6 +50,7 @@ fun classifyYtDlpError(stderr: String): String {
     if (Regex("HTTP Error 403|Unable to extract|nsig|Requested format is not available", RegexOption.IGNORE_CASE).containsMatchIn(stderr)) {
         return OUTDATED_MESSAGE
     }
+    if (Regex("Unsupported URL", RegexOption.IGNORE_CASE).containsMatchIn(stderr)) return UNSUPPORTED_MESSAGE
     if (Regex("Video unavailable|This video is not available", RegexOption.IGNORE_CASE).containsMatchIn(stderr)) return "Video unavailable"
     val last = stderr.lines().lastOrNull { it.startsWith("ERROR:") } ?: return "Download failed"
     return last.removePrefix("ERROR:").trim()
@@ -64,6 +69,7 @@ private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)
 private fun JsonObject.dbl(key: String): Double? = (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
 private fun JsonObject.long(key: String): Long? = dbl(key)?.roundToLong()
 private fun JsonObject.int(key: String): Int? = dbl(key)?.roundToLong()?.toInt()
+private fun JsonObject.bool(key: String): Boolean? = (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
 private fun JsonObject.list(key: String): List<JsonObject> = (this[key] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
 
 private fun entryUrl(e: JsonObject): String {
@@ -89,6 +95,7 @@ fun parseProbe(url: String, output: String): ProbeResult {
             PlaylistInfo(url, raw.str("title") ?: "Playlist", entries.map { PlaylistEntry(entryUrl(it), it.str("title") ?: "Video", it.int("duration")) })
         )
     }
+    if (raw.bool("is_live") == true || raw.str("live_status") in setOf("is_live", "is_upcoming")) throw YtDlpError(LIVE_MESSAGE)
     return ProbeResult.Video(
         VideoInfo(
             url = url,
