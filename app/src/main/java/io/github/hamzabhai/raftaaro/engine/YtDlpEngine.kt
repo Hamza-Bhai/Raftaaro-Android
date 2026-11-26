@@ -18,6 +18,11 @@ import io.github.hamzabhai.raftaaro.core.parseProbe
 import io.github.hamzabhai.raftaaro.core.planDirect
 import io.github.hamzabhai.raftaaro.core.PLAYER_CACHE_PLUGIN
 import io.github.hamzabhai.raftaaro.core.PRECOMPILE_SCRIPT
+import io.github.hamzabhai.raftaaro.core.WARM_UP_URL
+import io.github.hamzabhai.raftaaro.core.RATE_LIMIT_MESSAGE
+import io.github.hamzabhai.raftaaro.core.LIVE_MESSAGE
+import io.github.hamzabhai.raftaaro.core.isYouTubeUrl
+import io.github.hamzabhai.raftaaro.core.nextReadAt
 import io.github.hamzabhai.raftaaro.core.stalePlayerFiles
 import io.github.hamzabhai.raftaaro.core.probeArgs
 import io.github.hamzabhai.raftaaro.core.shouldUpdateYtDlp
@@ -30,6 +35,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -43,6 +49,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.coroutines.coroutineContext
+import kotlin.random.Random
 
 /** yt-dlp, Python and ffmpeg as bundled by youtubedl-android. */
 class YtDlpEngine(
@@ -65,9 +72,15 @@ class YtDlpEngine(
     /** yt-dlp's own cache (YouTube player code and solved challenges). */
     private val cacheDir = File(ctx.cacheDir, "yt-dlp")
     private val initLock = Mutex()
+    /** Paced (playlist) YouTube page reads go one at a time, a few seconds apart. */
+    private val readPace = Mutex()
+    @Volatile private var lastPacedRead: Long? = null
     private companion object {
         /** YouTube's stream addresses last about six hours; stay well inside that. */
         const val INFO_MAX_AGE_MS = 60 * 60 * 1000L
+        /** Pause between paced page reads, as yt-dlp's --sleep-interval 3 --max-sleep-interval 8 did. */
+        const val MIN_READ_GAP_MS = 3_000L
+        const val MAX_READ_GAP_MS = 8_000L
 
         /** One yt-dlp file per process: serialises updates across every engine instance. */
         val updateLock = Mutex()
@@ -102,8 +115,11 @@ class YtDlpEngine(
      */
     suspend fun precompileIfNeeded() {
         ensureReady()
-        if (compiledMark.isFile && compiledMark.readText() == ytDlpStamp()) return
+        fun compiled() = compiledMark.isFile && compiledMark.readText() == ytDlpStamp()
+        if (compiled()) return
         updateLock.withLock {
+            // another caller (start-up, the daily warm-up) may have compiled it while we waited
+            if (compiled()) return
             val src = bundled.ytDlp
             val tmp = File(src.parentFile, "yt-dlp.compiling")
             val script = File(ctx.cacheDir, "precompile.py").apply { writeText(PRECOMPILE_SCRIPT) }
@@ -193,6 +209,16 @@ class YtDlpEngine(
         return (running ?: mine).await()
     }
 
+    /**
+     * Reads [WARM_UP_URL] so yt-dlp's cache holds YouTube's current player with its challenge
+     * solved (and old players are deleted). Returns how long it took. Throws [YtDlpError].
+     */
+    suspend fun warmPlayerCache(): Long {
+        val t0 = System.currentTimeMillis()
+        probe(WARM_UP_URL, null)
+        return System.currentTimeMillis() - t0
+    }
+
     /** Lets a reading of this link that is under way finish, so its result can be used. */
     private suspend fun awaitProbe(url: String) {
         val running = probes[url] ?: return
@@ -216,6 +242,23 @@ class YtDlpEngine(
         return r
     }
 
+    /**
+     * Reads a playlist video's page so it can be fetched directly: after the pause since the last
+     * paced read, and not at all when a fresh reading is already kept.
+     */
+    private suspend fun pacedRead(url: String, cookieFile: File?) {
+        readPace.withLock {
+            if (freshInfo(url) != null) return
+            val gap = Random.nextLong(MIN_READ_GAP_MS, MAX_READ_GAP_MS + 1)
+            delay(nextReadAt(lastPacedRead, System.currentTimeMillis(), gap) - System.currentTimeMillis())
+            try {
+                probe(url, cookieFile)
+            } finally {
+                lastPacedRead = System.currentTimeMillis()
+            }
+        }
+    }
+
     /** Where the share sheet's reading of a link is kept for the download. */
     private fun infoFile(url: String): File {
         val hash = MessageDigest.getInstance("SHA-1").digest(url.toByteArray()).joinToString("") { "%02x".format(it) }
@@ -229,7 +272,8 @@ class YtDlpEngine(
     /**
      * Downloads into `workDir` (resuming .part files from an earlier run) and returns the finished file.
      * An "out of date" failure updates yt-dlp once and tries again. `paced`: part of a batch (a playlist),
-     * so YouTube downloads pause between requests; a single video starts at once.
+     * so YouTube downloads pause between requests; a single video starts at once. `readAhead`: the next
+     * playlist video, whose page is read while this one downloads.
      */
     suspend fun download(
         jobId: String,
@@ -241,7 +285,8 @@ class YtDlpEngine(
         onProgress: (VideoProgress) -> Unit,
         onMerging: () -> Unit,
         paced: Boolean = false,
-        parts: Int = 8
+        parts: Int = 8,
+        readAhead: String? = null
     ): File {
         workDir.mkdirs()
         // tapped while the share sheet was still reading the link: use that reading when it is done
@@ -249,7 +294,19 @@ class YtDlpEngine(
         val once: suspend (File?) -> File = { info ->
             downloadOnce(jobId, url, choice, workDir, cookieFile, expected, onProgress, onMerging, info, paced)
         }
+        // a playlist video: read its page (paced) so its streams can be fetched directly too
+        if (paced && direct != null && isYouTubeUrl(url) && freshInfo(url) == null) {
+            try {
+                pacedRead(url, cookieFile)
+            } catch (e: YtDlpError) {
+                // a cooldown or a live stream: yt-dlp would fail the same way
+                if (e.message == RATE_LIMIT_MESSAGE || e.message == LIVE_MESSAGE) throw e
+                Log.i("Raftaaro", "playlist video not read (${e.message}); handing it to yt-dlp")
+            }
+        }
         val info = freshInfo(url)
+        // read the next playlist video while this one downloads (it waits its turn in pacedRead)
+        if (readAhead != null && direct != null) scope.launch { runCatching { pacedRead(readAhead, cookieFile) } }
         // the streams yt-dlp would pick are plain downloads: fetch them ourselves, no Python to start
         val plan = if (direct != null && info != null) runCatching { planDirect(info.readText(), choice) }.getOrNull() else null
         if (plan != null) {

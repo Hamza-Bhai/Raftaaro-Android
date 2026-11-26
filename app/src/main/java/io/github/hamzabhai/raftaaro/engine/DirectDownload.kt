@@ -64,6 +64,8 @@ class DirectDownload(private val http: OkHttpClient, private val ffmpeg: Ffmpeg)
             inputs + when (plan.output) {
                 DirectOutput.MERGE_MP4 -> listOf("-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart")
                 DirectOutput.REMUX_MP4 -> listOf("-c", "copy", "-movflags", "+faststart")
+                DirectOutput.MERGE_MKV -> listOf("-map", "0:v:0", "-map", "1:a:0", "-c", "copy")
+                DirectOutput.REMUX_MKV -> listOf("-c", "copy")
                 DirectOutput.REMUX_M4A -> listOf("-vn", "-c", "copy", "-movflags", "+faststart")
                 DirectOutput.MP3 -> listOf("-vn", "-c:a", "libmp3lame", "-q:a", "0")
             } + out.absolutePath

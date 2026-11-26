@@ -11,6 +11,7 @@ import io.github.hamzabhai.raftaaro.core.afterFailure
 import io.github.hamzabhai.raftaaro.core.jobsToStart
 import io.github.hamzabhai.raftaaro.core.nextWake
 import io.github.hamzabhai.raftaaro.core.onAppStart
+import io.github.hamzabhai.raftaaro.core.readAheadFor
 import io.github.hamzabhai.raftaaro.http.HttpDownload
 import android.net.Uri
 import kotlinx.coroutines.CancellationException
@@ -184,7 +185,8 @@ class DownloadQueue(private val graph: AppGraph) {
                             { ticks.value = (ticks.value ?: Tick(0, null, 0)).copy(speed = 0, merging = true) },
                             // playlist entries go one after another: pace them; a single tap starts at once
                             paced = job.folder != null,
-                            parts = settings.partsPerFile
+                            parts = settings.partsPerFile,
+                            readAhead = readAheadFor(job, repo.all())
                         )
                     }
                 } finally {

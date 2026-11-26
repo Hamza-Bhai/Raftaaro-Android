@@ -94,7 +94,8 @@ class FormatsTest {
         for (c in videoChoices) {
             val args = buildFormatSelector(c)
             assertTrue(args[args.indexOf("-f") + 1].contains("+ba"))
-            assertEquals("mp4", args[args.indexOf("--merge-output-format") + 1])
+            // MP4 when the streams fit it, else MKV: VP9 in an MP4 plays as sound only on many phones
+            assertEquals("mp4/mkv", args[args.indexOf("--merge-output-format") + 1])
         }
     }
 
@@ -106,7 +107,7 @@ class FormatsTest {
     }
 
     @Test fun `caps the height for a chosen quality`() = assertEquals(
-        listOf("-f", "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b", "-S", "res,proto,+codec:avc:m4a", "--merge-output-format", "mp4"),
+        listOf("-f", "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b", "-S", "res,proto,+codec:avc:m4a", "--merge-output-format", "mp4/mkv"),
         buildFormatSelector(VideoChoice(MediaType.VIDEO, 720))
     )
 

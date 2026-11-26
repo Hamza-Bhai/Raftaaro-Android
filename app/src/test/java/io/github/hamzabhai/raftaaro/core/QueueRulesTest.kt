@@ -72,4 +72,20 @@ class QueueRulesTest {
     }
 
     @Test fun `nothing to wake for without a cooldown`() = assertNull(nextWake(listOf(job(1)), 0))
+
+    private fun entry(n: Int, status: JobStatus = JobStatus.QUEUED, folder: String? = "Mix") = yt(n, status).copy(folder = folder)
+
+    @Test fun `a playlist video reads ahead the oldest queued YouTube playlist video`() =
+        assertEquals("https://www.youtube.com/watch?v=2", readAheadFor(entry(1, JobStatus.DOWNLOADING), listOf(entry(3), entry(1, JobStatus.DOWNLOADING), entry(2))))
+
+    @Test fun `nothing is read ahead for a single video or when no playlist video waits`() {
+        assertNull(readAheadFor(entry(1, folder = null), listOf(entry(1, folder = null), entry(2))))
+        assertNull(readAheadFor(entry(1), listOf(entry(1), entry(2, JobStatus.DONE), entry(3, JobStatus.PAUSED), yt(4), job(5).copy(folder = "Mix"))))
+    }
+
+    @Test fun `the first read starts at once and later ones keep the gap after the last read`() {
+        assertEquals(100L, nextReadAt(null, 100, 5_000))
+        assertEquals(6_000L, nextReadAt(1_000, 2_000, 5_000))
+        assertEquals(9_000L, nextReadAt(1_000, 9_000, 5_000))
+    }
 }

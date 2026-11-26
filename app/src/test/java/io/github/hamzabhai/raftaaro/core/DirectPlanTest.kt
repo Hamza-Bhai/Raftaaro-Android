@@ -47,7 +47,26 @@ class DirectPlanTest {
     @Test fun `best takes the highest resolution, whatever its codec`() {
         val p = planDirect(typical, VideoChoice(MediaType.VIDEO, null))!!
         assertEquals("https://g.example/271", p.video!!.url)
-        assertEquals("My_ video [abc123].mp4", p.fileName)
+        // VP9 in an MP4 plays as sound only in many phones' own players (Transsion/MediaTek); MKV plays
+        assertEquals(DirectOutput.MERGE_MKV, p.output)
+        assertEquals("My_ video [abc123].mkv", p.fileName)
+    }
+
+    @Test fun `an Instagram reel's VP9 streams with m4a are joined into an mkv`() {
+        val reel = info(
+            fmt("dash-a", null, "none", "mp4a.40.5", "m4a"), fmt("dash-720v", 1280, "vp09.00.31.08", "none", "mp4"),
+            fmt("dash-1080v", 1920, "vp09.00.40.08", "none", "mp4")
+        )
+        val p = planDirect(reel, VideoChoice(MediaType.VIDEO, null))!!
+        assertEquals("https://g.example/dash-1080v", p.video!!.url)
+        assertEquals(DirectOutput.MERGE_MKV, p.output)
+        assertTrue(p.fileName.endsWith("].mkv"))
+    }
+
+    @Test fun `a VP9 stream with its own audio is remuxed into an mkv`() {
+        val p = planDirect(info(fmt("v", 720, "vp9", "opus", "webm")), v720)!!
+        assertEquals(DirectOutput.REMUX_MKV, p.output)
+        assertEquals("My_ video [abc123] 720p.mkv", p.fileName)
     }
 
     @Test fun `a height above every stream falls back to the best there is`() =

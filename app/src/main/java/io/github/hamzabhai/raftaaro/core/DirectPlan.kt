@@ -10,8 +10,14 @@ import kotlinx.serialization.json.doubleOrNull
 /** One stream to fetch with plain HTTP: its address, the headers yt-dlp would send, and its size if known. */
 data class DirectStream(val url: String, val ext: String, val size: Long?, val headers: Map<String, String>)
 
-/** What ffmpeg does with the fetched streams. */
-enum class DirectOutput { MERGE_MP4, REMUX_MP4, REMUX_M4A, MP3 }
+/**
+ * What ffmpeg does with the fetched streams. VP9 video goes into an MKV: in an MP4 it plays as sound
+ * only in many phones' own players (seen on a Transsion/MediaTek phone's gallery), in an MKV it plays.
+ */
+enum class DirectOutput { MERGE_MP4, REMUX_MP4, MERGE_MKV, REMUX_MKV, REMUX_M4A, MP3 }
+
+/** VP9, which [DirectOutput] keeps out of MP4 files. */
+fun isVp9(vcodec: String): Boolean = vcodec.lowercase().let { it.startsWith("vp09") || it.startsWith("vp9") }
 
 /** A download that skips yt-dlp: the streams yt-dlp would pick, fetched directly. */
 data class DirectPlan(val video: DirectStream?, val audio: DirectStream?, val output: DirectOutput, val fileName: String) {
@@ -109,18 +115,20 @@ fun planDirect(infoJson: String, choice: VideoChoice?): DirectPlan? {
         val h = choice.height
         val fits = if (h == null) withVideo else withVideo.filter { (it.height ?: 0) <= h }
         video = (fits.ifEmpty { withVideo }).sortedWith(videoOrder).firstOrNull() ?: return null
+        val mkv = isVp9(video.vcodec)
         if (video.hasAudio) {
             audio = null
-            output = DirectOutput.REMUX_MP4
+            output = if (mkv) DirectOutput.REMUX_MKV else DirectOutput.REMUX_MP4
         } else {
             audio = audioOnly.sortedWith(mergeAudioOrder).firstOrNull() ?: return null
-            output = DirectOutput.MERGE_MP4
+            output = if (mkv) DirectOutput.MERGE_MKV else DirectOutput.MERGE_MP4
         }
     }
     if (video?.plain == false || audio?.plain == false) return null
 
     val ext = when (output) {
         DirectOutput.MERGE_MP4, DirectOutput.REMUX_MP4 -> "mp4"
+        DirectOutput.MERGE_MKV, DirectOutput.REMUX_MKV -> "mkv"
         DirectOutput.REMUX_M4A -> "m4a"
         DirectOutput.MP3 -> "mp3"
     }
