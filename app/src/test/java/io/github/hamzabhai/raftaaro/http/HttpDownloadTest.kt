@@ -33,6 +33,8 @@ class HttpDownloadTest {
     private var ranges = true
     private var slow = false
     private var cutBody = false
+    /** The first this-many body requests drop the connection halfway (a network blip). */
+    private var cutFirst = 0
     private val rangeRequests: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private val server = MockWebServer()
     private val client = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
@@ -59,7 +61,8 @@ class HttpDownloadTest {
                     r = r.setChunkedBody(Buffer().write(data), 64 * 1024)
                 }
                 if (slow) r = r.throttleBody(8 * 1024, 20, TimeUnit.MILLISECONDS)
-                if (cutBody && range != "bytes=0-0") r = r.setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+                if (cutBody && range != "bytes=0-0") r = r.setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
+                if (range != "bytes=0-0" && synchronized(this) { cutFirst-- > 0 }) r = r.setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
                 return r
             }
         }
@@ -87,6 +90,23 @@ class HttpDownloadTest {
         }
         assertTrue(sizes.all { it <= 300_000 })
         assertTrue(sizes.size >= size / 300_000)
+    }
+
+    @Test fun `with a request cap every request is one aligned slice, so free connections take the next`() = runBlocking {
+        val cap = 300_000L
+        val result = HttpDownload(client, url("/file.bin"), dir(), 2, maxRequestBytes = cap).run {}
+        assertArrayEquals(data, result.file.readBytes())
+        val starts = rangeRequests.filter { it != "bytes=0-0" }.map { Regex("""bytes=(\d+)""").find(it)!!.groupValues[1].toLong() }.sorted()
+        // fixed halves would start the second connection at 1 MB; slices start at multiples of the cap
+        assertEquals((0 until (size + cap - 1) / cap).map { it * cap }, starts)
+    }
+
+    @Test fun `fetchParts leaves the parts unjoined, in order, together equal to the source`() = runBlocking {
+        val work = dir()
+        val parts = HttpDownload(client, url("/file.bin"), work, 3, maxRequestBytes = 300_000).fetchParts {}
+        assertTrue(parts.size > 3)
+        assertArrayEquals(data, parts.map { it.readBytes() }.reduce { a, b -> a + b })
+        assertFalse(File(work, "out").exists())
     }
 
     @Test fun `sends the given headers on every request`() = runBlocking {
@@ -165,9 +185,21 @@ class HttpDownloadTest {
         assertFalse(File(work, "out").exists())
     }
 
-    @Test fun `connection reset mid-body throws IOException`() = runBlocking {
+    @Test fun `a few dropped connections are retried and the download finishes`() = runBlocking {
+        cutFirst = 3
+        var maxSeen = 0L
+        var wentBack = false
+        val result = HttpDownload(client, url("/file.bin"), dir(), 4, retryDelayMs = 1).run {
+            if (it.received < maxSeen) wentBack = true
+            maxSeen = maxOf(maxSeen, it.received)
+        }
+        assertArrayEquals(data, result.file.readBytes())
+        assertFalse("progress went backwards", wentBack)
+    }
+
+    @Test fun `a connection that never comes back gives up with IOException`() = runBlocking {
         cutBody = true
-        val e = runCatching { HttpDownload(client, url("/file.bin"), dir(), 4).run {} }.exceptionOrNull()
+        val e = runCatching { HttpDownload(client, url("/file.bin"), dir(), 4, retryDelayMs = 1).run {} }.exceptionOrNull()
         assertTrue("got $e", e is IOException)
     }
 }

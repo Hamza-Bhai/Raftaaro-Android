@@ -2,10 +2,10 @@ package io.github.hamzabhai.raftaaro.http
 
 import io.github.hamzabhai.raftaaro.core.ByteRange
 import io.github.hamzabhai.raftaaro.core.sanitizeFileName
-import io.github.hamzabhai.raftaaro.core.splitRanges
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -20,6 +20,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.URLDecoder
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 
@@ -28,12 +29,21 @@ data class HttpProgress(val received: Long, val total: Long?, val speedBps: Long
 data class HttpResult(val file: File, val fileName: String)
 
 @Serializable
-private data class Meta(val url: String, val total: Long?, val ranges: List<ByteRange>?)
+private data class Meta(val url: String, val total: Long?, val slice: Long? = null)
 
 private data class Probe(val finalUrl: String, val total: Long?, val ranges: Boolean, val fileName: String)
 
 private const val PROGRESS_MS = 250L
 private const val SPEED_WINDOW_MS = 3000L
+/** Dropped connections in a row, with no bytes between them, before a part gives up. */
+private const val MAX_RETRIES = 5
+
+/** Worth asking again: a dropped or slow connection, or a server hiccup (5xx, 429). Not 403/404. */
+private fun isTransient(e: IOException): Boolean {
+    val code = Regex("""^HTTP (\d+)""").find(e.message.orEmpty())?.groupValues?.get(1)?.toInt()
+    if (code != null) return code >= 500 || code == 429 || code == 408
+    return e.message != "Server stopped supporting resume"
+}
 
 /** File name from Content-Disposition, else the last path segment of the (redirected) URL. */
 internal fun fileNameFrom(res: Response): String {
@@ -76,7 +86,9 @@ class HttpDownload(
     private val workDir: File,
     private val parts: Int,
     private val headers: Map<String, String> = emptyMap(),
-    private val maxRequestBytes: Long? = null
+    private val maxRequestBytes: Long? = null,
+    /** First pause before asking again after a dropped connection; doubles each time. */
+    private val retryDelayMs: Long = 1000
 ) {
     private val received = AtomicLong(0)
     private val calls: MutableSet<Call> = Collections.synchronizedSet(mutableSetOf())
@@ -84,7 +96,23 @@ class HttpDownload(
     private var lastEmit = 0L
     private var total: Long? = null
 
-    suspend fun run(onProgress: (HttpProgress) -> Unit): HttpResult = withContext(Dispatchers.IO) {
+    /** Downloads and joins the parts into one file. */
+    suspend fun run(onProgress: (HttpProgress) -> Unit): HttpResult = cancellable {
+        val (parts, name) = download(onProgress)
+        val out = File(workDir, "out").apply { mkdirs() }
+        val file = File(out, name)
+        FileOutputStream(file).use { dst -> parts.forEach { p -> p.inputStream().use { it.copyTo(dst, 1 shl 20) } } }
+        File(workDir, "parts").deleteRecursively()
+        HttpResult(file, name)
+    }
+
+    /**
+     * Downloads without joining: the parts, in order, which together are the file. They stay in
+     * `workDir` (for a resume) until the caller deletes it. Saves writing a big file twice.
+     */
+    suspend fun fetchParts(onProgress: (HttpProgress) -> Unit): List<File> = cancellable { download(onProgress).first }
+
+    private suspend fun <T> cancellable(block: suspend () -> T): T = withContext(Dispatchers.IO) {
         coroutineScope {
             // cancelling this coroutine aborts the blocking reads of every part
             val watcher = launch {
@@ -95,7 +123,7 @@ class HttpDownload(
                 }
             }
             try {
-                download(onProgress)
+                block()
             } catch (e: IOException) {
                 // aborted reads after a pause surface as "Socket closed": report the pause, not an error
                 coroutineContext.ensureActive()
@@ -106,36 +134,45 @@ class HttpDownload(
         }
     }
 
-    private suspend fun download(onProgress: (HttpProgress) -> Unit): HttpResult {
+    /** Fetches every part; returns them in order with the file's name. */
+    private suspend fun download(onProgress: (HttpProgress) -> Unit): Pair<List<File>, String> {
         val probe = probe()
         total = probe.total
         val partsDir = File(workDir, "parts")
         val metaFile = File(partsDir, "meta.json")
         val old = readMeta(metaFile)
-        if (old == null || old.url != url || old.total != probe.total || !probe.ranges) {
+        // slices of at most maxRequestBytes, handed to whichever connection is free: no connection is
+        // left fetching a big piece alone at the end (a long video then sat at 99% for minutes)
+        val sliceBytes = probe.total?.let { t -> maxRequestBytes ?: ((t + parts - 1) / parts).coerceAtLeast(1) }
+        if (old == null || old.url != url || old.total != probe.total || !probe.ranges || old.slice != sliceBytes) {
             partsDir.deleteRecursively()
             partsDir.mkdirs()
-            val plan = if (probe.ranges && probe.total != null) splitRanges(probe.total, parts) else null
-            metaFile.writeText(Json.encodeToString(Meta.serializer(), Meta(url, probe.total, plan)))
+            metaFile.writeText(Json.encodeToString(Meta.serializer(), Meta(url, probe.total, sliceBytes.takeIf { probe.ranges })))
         }
-        val plan = readMeta(metaFile)!!.ranges
+        val slice = readMeta(metaFile)!!.slice
+        val plan = if (slice != null && probe.total != null) {
+            (0 until (probe.total + slice - 1) / slice).map { i -> ByteRange(i * slice, minOf(probe.total, (i + 1) * slice) - 1) }
+        } else null
         if (plan != null) {
             received.set(plan.indices.sumOf { File(partsDir, "part-$it").length() })
+            val next = AtomicInteger(0)
             coroutineScope {
-                plan.forEachIndexed { i, r -> launch { fetchPart(probe.finalUrl, File(partsDir, "part-$i"), r, onProgress) } }
+                repeat(minOf(parts, plan.size)) {
+                    launch {
+                        while (true) {
+                            val i = next.getAndIncrement()
+                            if (i >= plan.size) break
+                            fetchPart(probe.finalUrl, File(partsDir, "part-$i"), plan[i], onProgress)
+                        }
+                    }
+                }
             }
         } else {
             received.set(0)
             fetchPart(probe.finalUrl, File(partsDir, "part-0"), null, onProgress)
         }
-        val out = File(workDir, "out").apply { mkdirs() }
-        val file = File(out, probe.fileName)
-        FileOutputStream(file).use { dst ->
-            for (i in 0 until (plan?.size ?: 1)) File(partsDir, "part-$i").inputStream().use { it.copyTo(dst) }
-        }
-        partsDir.deleteRecursively()
         emit(onProgress, force = true)
-        return HttpResult(file, probe.fileName)
+        return (0 until (plan?.size ?: 1)).map { File(partsDir, "part-$it") } to probe.fileName
     }
 
     private fun readMeta(f: File): Meta? =
@@ -175,11 +212,22 @@ class HttpDownload(
         try {
             if (range == null) return readPart(Request.Builder().url(finalUrl).build(), file, null, onProgress)
             // one request per slice of at most maxRequestBytes, each continuing where the file ends
+            var failures = 0
             while (true) {
                 val from = range.start + file.length()
                 if (from > range.end) return
                 val to = maxRequestBytes?.let { minOf(range.end, from + it - 1) } ?: range.end
-                readPart(Request.Builder().url(finalUrl).header("Range", "bytes=$from-$to").build(), file, ByteRange(range.start, to), onProgress)
+                try {
+                    readPart(Request.Builder().url(finalUrl).header("Range", "bytes=$from-$to").build(), file, ByteRange(range.start, to), onProgress)
+                    failures = 0
+                } catch (e: IOException) {
+                    coroutineContext.ensureActive()
+                    // a phone's connection drops now and then: ask again from where the part ends,
+                    // instead of failing the whole download (which then started over from 0)
+                    if (range.start + file.length() > from) failures = 0
+                    if (!isTransient(e) || ++failures > MAX_RETRIES) throw e
+                    delay(retryDelayMs shl (failures - 1))
+                }
             }
         } catch (e: IOException) {
             coroutineContext.ensureActive()

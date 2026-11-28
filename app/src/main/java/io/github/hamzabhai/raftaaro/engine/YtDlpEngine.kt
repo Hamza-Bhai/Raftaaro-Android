@@ -273,7 +273,8 @@ class YtDlpEngine(
      * Downloads into `workDir` (resuming .part files from an earlier run) and returns the finished file.
      * An "out of date" failure updates yt-dlp once and tries again. `paced`: part of a batch (a playlist),
      * so YouTube downloads pause between requests; a single video starts at once. `readAhead`: the next
-     * playlist video, whose page is read while this one downloads.
+     * playlist video, whose page is read while this one downloads. `target`: where a direct
+     * download may write its file in its final place (the returned file is then that one).
      */
     suspend fun download(
         jobId: String,
@@ -286,7 +287,8 @@ class YtDlpEngine(
         onMerging: () -> Unit,
         paced: Boolean = false,
         parts: Int = 8,
-        readAhead: String? = null
+        readAhead: String? = null,
+        target: SaveTarget? = null
     ): File {
         workDir.mkdirs()
         // tapped while the share sheet was still reading the link: use that reading when it is done
@@ -312,7 +314,7 @@ class YtDlpEngine(
         if (plan != null) {
             ensureReady()
             try {
-                return direct!!.run(plan, workDir, parts, onProgress, onMerging)
+                return direct!!.run(plan, workDir, parts, onProgress, onMerging, target)
             } catch (e: IOException) {
                 Log.i("Raftaaro", "direct download failed (${e.message}); handing it to yt-dlp")
             }

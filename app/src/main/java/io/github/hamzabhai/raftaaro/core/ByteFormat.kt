@@ -33,3 +33,20 @@ fun formatDuration(sec: Int?): String {
     val s = sec % 60
     return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s) else String.format(Locale.US, "%d:%02d", m, s)
 }
+
+/**
+ * The ongoing notification's line: "1 downloading · 45% · 3.2 MB/s · 2 min left".
+ * `running` counts jobs downloading or finishing; `finishing` those being joined and saved.
+ */
+fun progressText(running: Int, finishing: Int, percent: Int?, speedBps: Long, etaSec: Long?): String {
+    if (running == 0) return "Starting…"
+    val downloading = running - finishing
+    if (downloading == 0) return "Finishing…"
+    return listOfNotNull(
+        "$downloading downloading",
+        finishing.takeIf { it > 0 }?.let { "$it finishing" },
+        percent?.let { "$it%" },
+        speedBps.takeIf { it > 0 }?.let(::formatSpeed),
+        formatEta(etaSec).ifEmpty { null }
+    ).joinToString(" · ")
+}

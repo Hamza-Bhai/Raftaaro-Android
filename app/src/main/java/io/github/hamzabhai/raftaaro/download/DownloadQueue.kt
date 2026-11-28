@@ -14,6 +14,7 @@ import io.github.hamzabhai.raftaaro.core.onAppStart
 import io.github.hamzabhai.raftaaro.core.readAheadFor
 import io.github.hamzabhai.raftaaro.http.HttpDownload
 import android.net.Uri
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job as CoJob
@@ -154,6 +155,9 @@ class DownloadQueue(private val graph: AppGraph) {
         repo.update(job)
         val settings = graph.settings.current()
         val work = graph.workDir(job.id)
+        var mergingAt = 0L
+        // where a direct download writes its file straight into Downloads (Android 11+, default folder)
+        val target = if (job.kind == JobKind.FILE) null else graph.saver.directTarget(bucketOf(job.kind, job.choice), job.folder, settings)
         try {
             val ticks = MutableStateFlow<Tick?>(null)
             val file = coroutineScope {
@@ -182,18 +186,31 @@ class DownloadQueue(private val graph: AppGraph) {
                         graph.engine.download(
                             job.id, job.url, job.choice, work, cookies, job.totalBytes,
                             { ticks.value = Tick(it.received, it.total, it.speedBps, ticks.value?.merging == true) },
-                            { ticks.value = (ticks.value ?: Tick(0, null, 0)).copy(speed = 0, merging = true) },
+                            {
+                                if (mergingAt == 0L) mergingAt = System.currentTimeMillis()
+                                ticks.value = (ticks.value ?: Tick(0, null, 0)).copy(speed = 0, merging = true)
+                            },
                             // playlist entries go one after another: pace them; a single tap starts at once
                             paced = job.folder != null,
                             parts = settings.partsPerFile,
-                            readAhead = readAheadFor(job, repo.all())
+                            readAhead = readAheadFor(job, repo.all()),
+                            target = target
                         )
                     }
                 } finally {
                     withContext(NonCancellable) { writer.cancelAndJoin() }
                 }
             }
-            val saved = graph.saver.save(file, bucketOf(job.kind, job.choice), job.folder, settings)
+            val tSave = System.currentTimeMillis()
+            val mb = file.length() shr 20
+            val saved = if (target != null && target.file == file) {
+                target.commit()
+            } else {
+                target?.abort()
+                graph.saver.save(file, bucketOf(job.kind, job.choice), job.folder, settings)
+            }
+            val tDone = System.currentTimeMillis()
+            Log.i("Raftaaro", "finish timing: finishing ${if (mergingAt > 0) tSave - mergingAt else 0} ms, saving ${tDone - tSave} ms ($mb MB)")
             val size = runCatching {
                 graph.context.contentResolver.openAssetFileDescriptor(Uri.parse(saved.uri), "r")?.use { it.length }
             }.getOrNull()?.takeIf { it > 0 } ?: job.totalBytes
@@ -205,8 +222,10 @@ class DownloadQueue(private val graph: AppGraph) {
             work.deleteRecursively()
             Notifications.finished(graph.context, job)
         } catch (e: CancellationException) {
+            target?.abort() // a half-written file must not stay in Downloads
             throw e // paused or removed: whoever cancelled sets the state
         } catch (e: Throwable) {
+            target?.abort()
             repo.update(afterFailure(job, e.message ?: e.javaClass.simpleName, System.currentTimeMillis()))
         }
         lock.withLock { running.remove(start.id) }
