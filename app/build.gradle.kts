@@ -20,9 +20,12 @@ android {
         applicationId = "io.github.hamzabhai.raftaaro"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // F-Droid builds with -PytdlpAutoUpdate=false: yt-dlp then updates only when the user taps
+        // "Update now" in Settings, never on its own (F-Droid does not want code fetched in the background)
+        buildConfigField("boolean", "YTDLP_AUTO_UPDATE", (findProperty("ytdlpAutoUpdate") ?: "true").toString())
     }
 
     splits {
@@ -35,7 +38,7 @@ android {
     }
 
     // Release key and passwords live in local.properties (git-ignored) or, on CI, in environment
-    // variables. Without them a local release build is signed with the debug key, for testing only.
+    // variables. Without them a release build is left unsigned (F-Droid signs it with its own key).
     val props = Properties().apply {
         rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
     }
@@ -56,7 +59,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
@@ -76,6 +79,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

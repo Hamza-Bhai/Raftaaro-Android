@@ -6,6 +6,7 @@ import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import io.github.hamzabhai.raftaaro.BuildConfig
 import io.github.hamzabhai.raftaaro.core.OUTDATED_MESSAGE
 import io.github.hamzabhai.raftaaro.core.ProbeResult
 import io.github.hamzabhai.raftaaro.core.ProgressTracker
@@ -332,7 +333,8 @@ class YtDlpEngine(
         return try {
             once(null)
         } catch (e: YtDlpError) {
-            if (e.message != OUTDATED_MESSAGE) throw e
+            // an F-Droid build tells the user to update from Settings instead
+            if (e.message != OUTDATED_MESSAGE || !BuildConfig.YTDLP_AUTO_UPDATE) throw e
             updateNow()
             once(null)
         }
@@ -372,8 +374,12 @@ class YtDlpEngine(
         YoutubeDL.getInstance().destroyProcessById(jobId)
     }
 
-    /** Checks for a new yt-dlp at most once a day. Failures are ignored (next start tries again). */
+    /**
+     * Checks for a new yt-dlp at most once a day. Failures are ignored (next start tries again).
+     * Never in an F-Droid build ([BuildConfig.YTDLP_AUTO_UPDATE] off): the user updates from Settings.
+     */
     suspend fun updateIfDue(settings: SettingsStore) {
+        if (!BuildConfig.YTDLP_AUTO_UPDATE) return
         if (!shouldUpdateYtDlp(settings.current().lastYtDlpUpdate, System.currentTimeMillis())) return
         runCatching { updateNow() }.onSuccess {
             settings.update { it.copy(lastYtDlpUpdate = System.currentTimeMillis()) }

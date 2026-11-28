@@ -1,0 +1,4 @@
+- Long videos finish about 4x faster: no more waiting at 99% while the file is joined and copied
+- A dropped connection no longer restarts the download from zero
+- The notification shows speed and time left
+- New home screen: one list with clear status for each download
