@@ -21,7 +21,7 @@ See a video in YouTube, Instagram, Facebook or any other app? Tap Share, choose 
 <ul>
 <li>Sign in to YouTube, Instagram or Facebook inside the app for videos that need it; your sign-in stays on your phone</li>
 <li>Offers to download a link you copied</li>
-<li>yt-dlp updates itself</li>
+<li>keep yt-dlp current with one tap in Settings</li>
 </ul>
 
 Raftaaro uses yt-dlp, FFmpeg, Python and QuickJS through youtubedl-android.

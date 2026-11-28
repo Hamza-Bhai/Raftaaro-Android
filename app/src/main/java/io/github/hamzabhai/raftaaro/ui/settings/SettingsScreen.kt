@@ -1,5 +1,6 @@
 package io.github.hamzabhai.raftaaro.ui.settings
 
+import io.github.hamzabhai.raftaaro.BuildConfig
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -147,7 +148,7 @@ fun SettingsContent(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("yt-dlp ${ytDlpVersion ?: "…"}", style = MaterialTheme.typography.bodyLarge)
-                    Text(updateMessage ?: "Updates itself once a day", style = MaterialTheme.typography.bodySmall)
+                    Text(updateMessage ?: if (BuildConfig.YTDLP_AUTO_UPDATE) "Updates itself once a day" else "Tap Update now when downloads start failing", style = MaterialTheme.typography.bodySmall)
                 }
                 TextButton(onClick = onUpdate) { Text("Update now") }
             }

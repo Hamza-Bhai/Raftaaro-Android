@@ -1,0 +1,59 @@
+# Draft for https://gitlab.com/fdroid/fdroiddata (metadata/io.github.hamzabhai.raftaaro.yml).
+# Kept here so it changes together with the build; copy it into an fdroiddata merge request.
+AntiFeatures:
+  NonFreeNet:
+    en-US: Downloads from YouTube and other non-free sites, and fetches yt-dlp updates from GitHub when asked
+Categories:
+  - Multimedia
+  - Internet
+License: GPL-3.0-only
+AuthorName: Hamza-Bhai
+SourceCode: https://github.com/Hamza-Bhai/Raftaaro-Android
+IssueTracker: https://github.com/Hamza-Bhai/Raftaaro-Android/issues
+Changelog: https://github.com/Hamza-Bhai/Raftaaro-Android/releases
+
+AutoName: Raftaaro
+
+RepoType: git
+Repo: https://github.com/Hamza-Bhai/Raftaaro-Android.git
+
+Builds:
+  - versionName: 0.2.0
+    versionCode: 21
+    commit: v0.2.0
+    subdir: app
+    gradle:
+      - yes
+    output: build/outputs/apk/release/app-armeabi-v7a-release-unsigned.apk
+    gradleprops:
+      - ytdlpAutoUpdate=false
+
+  - versionName: 0.2.0
+    versionCode: 22
+    commit: v0.2.0
+    subdir: app
+    gradle:
+      - yes
+    output: build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
+    gradleprops:
+      - ytdlpAutoUpdate=false
+
+  - versionName: 0.2.0
+    versionCode: 23
+    commit: v0.2.0
+    subdir: app
+    gradle:
+      - yes
+    output: build/outputs/apk/release/app-x86_64-release-unsigned.apk
+    gradleprops:
+      - ytdlpAutoUpdate=false
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9.]+$
+VercodeOperation:
+  - 10*%c+1
+  - 10*%c+2
+  - 10*%c+3
+UpdateCheckData: app/build.gradle.kts|versionCode\s=\s(\d+)|.|versionName\s=\s"([\d.]+)"
+CurrentVersion: 0.2.0
+CurrentVersionCode: 23

@@ -56,7 +56,7 @@ release.keyAlias=raftaaro
 release.keyPassword=...
 ```
 
-Without these, a local release build is signed with the debug key (for testing only).
+Without these, a release build is left unsigned (F-Droid signs its builds with its own key). For a quick local test, install the debug build instead.
 
 For the GitHub release workflow (`.github/workflows/release.yml`, runs on `v*` tags), add the repository secrets `RELEASE_KEYSTORE_BASE64` (the `.jks` file in base64), `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS` and `RELEASE_KEY_PASSWORD`.
 
