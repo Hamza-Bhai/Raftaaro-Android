@@ -7,6 +7,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import io.github.hamzabhai.raftaaro.core.JobStatus
+import io.github.hamzabhai.raftaaro.core.progressText
 import io.github.hamzabhai.raftaaro.graph
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -21,7 +23,7 @@ class DownloadService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         ServiceCompat.startForeground(
-            this, Notifications.PROGRESS_ID, Notifications.progress(this, 0, null),
+            this, Notifications.PROGRESS_ID, Notifications.progress(this, progressText(0, 0, null, 0, null), null),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
         )
         if (intent?.action == ACTION_PAUSE_ALL) {
@@ -37,10 +39,15 @@ class DownloadService : LifecycleService() {
                 }
                 val total = live.sumOf { it.totalBytes ?: 0 }
                 val percent = if (live.all { it.totalBytes != null } && total > 0) (live.sumOf { it.receivedBytes } * 100 / total).toInt() else null
-                val running = live.count { it.status != io.github.hamzabhai.raftaaro.core.JobStatus.QUEUED }
+                val running = live.count { it.status != JobStatus.QUEUED }
+                val finishing = live.count { it.status == JobStatus.MERGING }
+                val speed = live.filter { it.status == JobStatus.DOWNLOADING }.sumOf { it.speedBps }
+                val left = if (live.all { it.totalBytes != null }) (total - live.sumOf { it.receivedBytes }).coerceAtLeast(0) else null
+                val eta = if (left != null && speed > 0) left / speed else null
+                val text = progressText(running, finishing, percent, speed, eta)
                 runCatching {
                     NotificationManagerCompat.from(this@DownloadService)
-                        .notify(Notifications.PROGRESS_ID, Notifications.progress(this@DownloadService, running, percent))
+                        .notify(Notifications.PROGRESS_ID, Notifications.progress(this@DownloadService, text, percent))
                 }
             }
         }

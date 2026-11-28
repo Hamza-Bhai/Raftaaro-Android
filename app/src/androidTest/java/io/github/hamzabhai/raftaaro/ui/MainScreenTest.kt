@@ -1,5 +1,6 @@
 package io.github.hamzabhai.raftaaro.ui
 
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -11,6 +12,7 @@ import io.github.hamzabhai.raftaaro.ui.main.CardAction
 import io.github.hamzabhai.raftaaro.ui.main.MainScreenContent
 import io.github.hamzabhai.raftaaro.ui.theme.RaftaaroTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,14 +54,21 @@ class MainScreenTest {
         assertEquals("e" to CardAction.RETRY, action)
     }
 
-    @Test fun theFinishedFilterHidesActiveJobs() {
+    @Test fun oneListShowsEveryJobWithFinishedOnesBelow() {
+        show(listOf(job("d", JobStatus.DONE), job("p", JobStatus.PAUSED), job("e", JobStatus.ERROR, "HTTP 404")))
+        rule.onNodeWithText("Active").assertDoesNotExist()
+        rule.onNodeWithText("Finished").assertDoesNotExist()
+        val top = listOf("p", "e", "d").map { rule.onNodeWithText("Title $it").getUnclippedBoundsInRoot().top.value }
+        assertTrue("unfinished jobs sit above finished ones: $top", top[0] < top[2] && top[1] < top[2])
+        rule.onNodeWithText("1 paused · 1 failed · 1 done").assertExists()
+    }
+
+    @Test fun aFinishedCardOffersOpenAndShare() {
         show()
-        rule.onNodeWithText("Finished").performClick()
-        rule.onNodeWithText("Title d").assertExists()
-        rule.onNodeWithText("Title p").assertDoesNotExist()
-        rule.onNodeWithText("Active").performClick()
-        rule.onNodeWithText("Title p").assertExists()
-        rule.onNodeWithText("Title d").assertDoesNotExist()
+        rule.onNodeWithText("Share").performClick()
+        assertEquals("d" to CardAction.SHARE, action)
+        rule.onNodeWithText("Open").performClick()
+        assertEquals("d" to CardAction.OPEN, action)
     }
 
     @Test fun anEmptyListExplainsWhatToDo() {

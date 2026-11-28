@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.github.hamzabhai.raftaaro.core.Job
+import io.github.hamzabhai.raftaaro.core.progressText
 import io.github.hamzabhai.raftaaro.graph
 import io.github.hamzabhai.raftaaro.ui.main.MainActivity
 
@@ -33,14 +34,13 @@ object Notifications {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 
-    /** The ongoing summary shown while the service runs: "2 downloading · 45%". */
-    fun progress(ctx: Context, active: Int, percent: Int?): Notification {
+    /** The ongoing summary shown while the service runs, with `text` from [progressText]. */
+    fun progress(ctx: Context, text: String, percent: Int?): Notification {
         createChannels(ctx)
         val pauseAll = PendingIntent.getService(
             ctx, 1, Intent(ctx, DownloadService::class.java).setAction(DownloadService.ACTION_PAUSE_ALL),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val text = if (active == 0) "Starting…" else "$active downloading" + (percent?.let { " · $it%" } ?: "")
         return NotificationCompat.Builder(ctx, CH_PROGRESS)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("Raftaaro")

@@ -7,6 +7,7 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
@@ -16,7 +17,9 @@ import io.github.hamzabhai.raftaaro.core.MediaType
 import io.github.hamzabhai.raftaaro.core.Settings
 import io.github.hamzabhai.raftaaro.core.VideoChoice
 import io.github.hamzabhai.raftaaro.core.uniqueName
+import io.github.hamzabhai.raftaaro.engine.SaveTarget
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -56,6 +59,73 @@ class Saver(context: Context) {
         }
         file.delete()
         saved
+    }
+
+    /**
+     * On Android 11+, saving to the default Downloads folder: a [SaveTarget] whose file is already
+     * in Downloads, so ffmpeg writes it there and nothing is copied. Null elsewhere (a folder picked
+     * in Settings, or older Android), where [save] copies as before.
+     */
+    fun directTarget(bucket: Bucket, subfolder: String?, settings: Settings): DirectSave? {
+        val tree = when (bucket) {
+            Bucket.VIDEOS -> settings.videosDir
+            Bucket.AUDIO -> settings.audioDir
+            Bucket.FILES -> settings.filesDir
+        }
+        return if (tree == null && Build.VERSION.SDK_INT >= 30) DirectSave(bucket, subfolder) else null
+    }
+
+    /** A pending Downloads entry written through its file path; [commit] publishes it. */
+    inner class DirectSave(private val bucket: Bucket, private val subfolder: String?) : SaveTarget {
+        private var uri: Uri? = null
+        private var pfd: ParcelFileDescriptor? = null
+        /** The file handed out by [open], if any. */
+        var file: File? = null
+            private set
+
+        override suspend fun open(name: String): File? = withContext(Dispatchers.IO) {
+            val path = listOfNotNull(Environment.DIRECTORY_DOWNLOADS, "Raftaaro", bucket.folder, subfolder).joinToString("/")
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                put(MediaStore.Downloads.MIME_TYPE, mimeOf(name))
+                put(MediaStore.Downloads.RELATIVE_PATH, path)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val u = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return@withContext null
+            uri = u
+            // ffmpeg cannot open a pending Downloads file by its path ("File exists"): the app opens it
+            // and ffmpeg, running as the same app, writes through this process's open descriptor
+            val fd = runCatching { resolver.openFileDescriptor(u, "rw") }.getOrNull()
+            if (fd == null) {
+                abort()
+                return@withContext null
+            }
+            pfd = fd
+            File("/proc/${android.os.Process.myPid()}/fd/${fd.fd}").also { file = it }
+        }
+
+        override suspend fun abort() {
+            withContext(Dispatchers.IO + NonCancellable) {
+                pfd?.let { runCatching { it.close() } }
+                pfd = null
+                uri?.let { runCatching { resolver.delete(it, null, null) } }
+                uri = null
+                file = null
+            }
+        }
+
+        /** Publishes the written file to the gallery and file managers. */
+        suspend fun commit(): SavedFile = withContext(Dispatchers.IO) {
+            val u = uri ?: throw IOException("Nothing was written to Downloads")
+            pfd?.close()
+            pfd = null
+            resolver.update(u, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+            val name = resolver.query(u, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            } ?: file?.name.orEmpty()
+            uri = null // published: a later abort must not delete it
+            SavedFile(u.toString(), name)
+        }
     }
 
     private fun saveToMediaStore(file: File, bucket: Bucket, subfolder: String?): SavedFile {
